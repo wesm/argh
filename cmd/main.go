@@ -31,10 +31,19 @@ func main() {
 		return
 	}
 
-	// Load configuration
-	cfg, err := config.LoadConfig(*configPath)
-	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+	// Check if we need to perform any operations that require the config
+	needConfig := *addRepo != "" || *syncAll || *syncRepo != ""
+	
+	// Only load configuration if needed
+	var cfg *config.Config
+	var err error
+	
+	if needConfig {
+		// Load configuration
+		cfg, err = config.LoadConfig(*configPath)
+		if err != nil {
+			log.Fatalf("Failed to load configuration: %v", err)
+		}
 	}
 
 	// Add repository if requested
@@ -66,6 +75,40 @@ func main() {
 		if !*syncAll && *syncRepo == "" {
 			return
 		}
+	}
+
+	// If no operation flags are set, show help and exit
+	if !needConfig {
+		// No sync operation requested - show help message
+		fmt.Println("GIRD - GitHub Issues Repo Database")
+		fmt.Println("==================================")
+		fmt.Println("A tool for syncing GitHub issues and pull requests to a local SQLite database.")
+		fmt.Println()
+		fmt.Println("USAGE:")
+		fmt.Println("  ./gird [options]")
+		fmt.Println()
+		fmt.Println("OPTIONS:")
+		fmt.Println("  -init                   Create a default configuration file")
+		fmt.Println("  -config <path>          Specify a custom configuration file (default: config.json)")
+		fmt.Println("  -add-repo <owner/name>  Add a repository to the configuration")
+		fmt.Println("  -sync-all               Sync all repositories in the configuration")
+		fmt.Println("  -sync-repo <owner/name> Sync a specific repository")
+		fmt.Println()
+		fmt.Println("EXAMPLES:")
+		fmt.Println("  ./gird -init                           # Create default config.json")
+		fmt.Println("  ./gird -add-repo golang/go             # Add the Go repository to config")
+		fmt.Println("  ./gird -sync-repo golang/go            # Sync only the Go repository")
+		fmt.Println("  ./gird -sync-all                       # Sync all configured repositories")
+		fmt.Println("  ./gird -config custom.json -sync-all   # Use custom config file and sync all repos")
+		fmt.Println()
+		fmt.Println("CONFIGURATION:")
+		fmt.Printf("  GitHub token can be provided via the %s environment variable\n", config.EnvGithubToken)
+		fmt.Println("  or in the config.json file.")
+		fmt.Println()
+		fmt.Println("DATABASE:")
+		fmt.Println("  The SQLite database will be created at the path specified in the config file.")
+		fmt.Println("  Default: github_issues.db in the current directory")
+		return
 	}
 
 	// Initialize database
@@ -117,18 +160,6 @@ func main() {
 				continue
 			}
 		}
-	} else {
-		// No sync operation requested
-		fmt.Println("GIRD - GitHub Issues Repo Digest")
-		fmt.Println("--------------------------------")
-		fmt.Println("Use -sync-all to sync all repositories in the configuration")
-		fmt.Println("Use -sync-repo owner/name to sync a specific repository")
-		fmt.Println("Use -add-repo owner/name to add a repository to the configuration")
-		fmt.Println("Use -init to create a default configuration file")
-		fmt.Println("Use -config path/to/config.json to specify a custom configuration file")
-		fmt.Println()
-		fmt.Printf("GitHub token can be provided via the %s environment variable\n", config.EnvGithubToken)
-		return
 	}
 
 	duration := time.Since(startTime)
