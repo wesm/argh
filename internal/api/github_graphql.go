@@ -56,11 +56,10 @@ type Issue struct {
 	UpdatedAt githubv4.DateTime
 	ClosedAt  *githubv4.DateTime
 	Author    Actor
-	IsPullRequest struct {
-		PullRequest struct {
-			ID githubv4.ID
-		}
-	} `graphql:"projectCards: projectCards(first: 0)"`
+	// Use proper approach to detect if an issue is a pull request
+	PullRequest struct {
+		URL githubv4.String
+	} `graphql:"pullRequest { url }"`
 	Comments struct {
 		Nodes []Comment
 		PageInfo struct {
@@ -258,11 +257,11 @@ func (c *GraphQLClient) fetchIssuesBatch(
 			Title:         string(issue.Title),
 			Body:          string(issue.Body),
 			State:         string(issue.State),
-			IsPullRequest: issue.IsPullRequest.PullRequest.ID != nil,
 			CreatedAt:     convertDateTime(issue.CreatedAt),
 			UpdatedAt:     convertDateTime(issue.UpdatedAt),
 			ClosedAt:      convertNullableDateTime(issue.ClosedAt),
 			UserID:        userID,
+			IsPullRequest: string(issue.PullRequest.URL) != "",
 		}
 
 		// Convert comments
