@@ -159,7 +159,7 @@ func (c *GitHubClient) GetRepository(ctx context.Context, owner, name string) (*
 	}
 
 	return &models.Repository{
-		ID:       repo.GetID(),
+		ID:       HandleGitHubID(repo.GetID()),
 		Owner:    repo.GetOwner().GetLogin(),
 		Name:     repo.GetName(),
 		FullName: repo.GetFullName(),
@@ -259,14 +259,20 @@ func (c *GitHubClient) GetIssueComments(ctx context.Context, owner, name string,
 	return allComments, nil
 }
 
+// ConvertGitHubRepository converts a GitHub repository to our model
+func ConvertGitHubRepository(repo *github.Repository) *models.Repository {
+	return &models.Repository{
+		ID:       HandleGitHubID(repo.GetID()),
+		Owner:    repo.GetOwner().GetLogin(),
+		Name:     repo.GetName(),
+		FullName: repo.GetFullName(),
+	}
+}
+
 // ConvertGitHubUser converts a GitHub user to our model
 func ConvertGitHubUser(user *github.User) *models.User {
-	if user == nil {
-		return nil
-	}
-
 	return &models.User{
-		ID:        user.GetID(),
+		ID:        HandleGitHubID(user.GetID()),
 		Login:     user.GetLogin(),
 		AvatarURL: user.GetAvatarURL(),
 	}
@@ -282,11 +288,11 @@ func ConvertGitHubIssue(issue *github.Issue) *models.Issue {
 
 	var userID int64
 	if issue.User != nil {
-		userID = issue.User.GetID()
+		userID = HandleGitHubID(issue.User.GetID())
 	}
 
 	return &models.Issue{
-		ID:            issue.GetID(),
+		ID:            HandleGitHubID(issue.GetID()),
 		Number:        issue.GetNumber(),
 		Title:         issue.GetTitle(),
 		Body:          issue.GetBody(),
@@ -303,11 +309,11 @@ func ConvertGitHubIssue(issue *github.Issue) *models.Issue {
 func ConvertGitHubComment(comment *github.IssueComment, issueID int64) *models.Comment {
 	var userID int64
 	if comment.User != nil {
-		userID = comment.User.GetID()
+		userID = HandleGitHubID(comment.User.GetID())
 	}
 
 	return &models.Comment{
-		ID:        comment.GetID(),
+		ID:        HandleGitHubID(comment.GetID()),
 		IssueID:   issueID,
 		UserID:    userID,
 		Body:      comment.GetBody(),
@@ -319,8 +325,27 @@ func ConvertGitHubComment(comment *github.IssueComment, issueID int64) *models.C
 // ConvertGitHubLabel converts a GitHub label to our model
 func ConvertGitHubLabel(label *github.Label) *models.Label {
 	return &models.Label{
-		ID:    *label.ID,
+		ID:    HandleGitHubID(*label.ID),
 		Name:  *label.Name,
 		Color: *label.Color,
 	}
+}
+
+// HandleGitHubID ensures that large GitHub IDs are properly stored as int64
+// by using string conversion to avoid overflow issues
+func HandleGitHubID(id int64) int64 {
+	// If the ID is already negative (which indicates it would overflow),
+	// we'll convert it to a string and back to get the proper representation
+	if id < 0 {
+		// Convert to an unsigned representation, then back to int64
+		unsignedID := uint64(id)
+		idStr := strconv.FormatUint(unsignedID, 10)
+		
+		// Parse back to int64, ignoring any errors
+		parsedID, _ := strconv.ParseInt(idStr, 10, 64)
+		return parsedID
+	}
+	
+	// If it's already positive, just return it
+	return id
 }

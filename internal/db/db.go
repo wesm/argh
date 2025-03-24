@@ -204,9 +204,8 @@ func (db *DB) SaveLabel(label *models.Label) (int64, error) {
 	query := `
 	INSERT INTO labels (id, name, color)
 	VALUES (?, ?, ?)
-	ON CONFLICT(id) DO UPDATE SET
-		name = excluded.name,
-		color = excluded.color
+	ON CONFLICT(name, color) DO UPDATE SET
+		id = excluded.id
 	RETURNING id
 	`
 
@@ -214,20 +213,41 @@ func (db *DB) SaveLabel(label *models.Label) (int64, error) {
 	err := db.QueryRow(query, label.ID, label.Name, label.Color).Scan(&id)
 	if err != nil {
 		// If RETURNING is not supported, try a different approach
+		// First try to get existing ID
+		var existingID int64
+		existErr := db.QueryRow(
+			`SELECT id FROM labels WHERE name = ? AND color = ?`,
+			label.Name, label.Color,
+		).Scan(&existingID)
+		
+		if existErr == nil {
+			// Label exists, return the existing ID
+			return existingID, nil
+		}
+		
+		// Try to insert with conflict handling
 		_, err = db.Exec(
 			`INSERT INTO labels (id, name, color)
 			VALUES (?, ?, ?)
-			ON CONFLICT(id) DO UPDATE SET
-				name = excluded.name,
-				color = excluded.color`,
+			ON CONFLICT(name, color) DO UPDATE SET
+				id = excluded.id`,
 			label.ID, label.Name, label.Color,
 		)
 		if err != nil {
 			return 0, fmt.Errorf("failed to save label: %w", err)
 		}
-		id = label.ID
+		
+		// Get the ID after insert/update
+		err = db.QueryRow(
+			`SELECT id FROM labels WHERE name = ? AND color = ?`,
+			label.Name, label.Color,
+		).Scan(&id)
+		if err != nil {
+			return 0, fmt.Errorf("failed to get label ID after save: %w", err)
+		}
+		return id, nil
 	}
-
+	
 	return id, nil
 }
 
