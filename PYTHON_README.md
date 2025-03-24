@@ -29,6 +29,10 @@ python gird_activity_report.py [options]
 - `--repos REPO [REPO ...]`: Specific repositories to filter by (in owner/name format)
 - `--list-repos`: List all repositories in the database
 - `--output FILE`: Output file for the report (default: print to stdout)
+- `--top-contributors N`: Number of top contributors to include (default: 10, 0 to disable)
+- `--hot-issues N`: Number of most active issues to include (default: 5, 0 to disable)
+- `--chunk-size N`: Maximum characters per chunk for large reports (default: 20000)
+- `--time-chunks N`: Split report into time chunks of specified days (optional)
 - `--claude`: Send the report to Claude for summarization
 - `--claude-key KEY`: Claude API key
 - `--claude-prompt PROMPT`: Custom prompt for Claude
@@ -59,6 +63,67 @@ Save the report to a file:
 ```bash
 python gird_activity_report.py --output activity_report.md
 ```
+
+Generate a report with top 5 contributors and top 10 hot issues:
+```bash
+python gird_activity_report.py --top-contributors 5 --hot-issues 10
+```
+
+Break a large time period into weekly chunks:
+```bash
+python gird_activity_report.py --days 30 --time-chunks 7
+```
+
+## Enhanced Report Features
+
+The activity report script now includes several enhanced features to make GitHub activity reports more informative and manageable:
+
+### Executive Summary
+
+Each report begins with an executive summary that provides high-level statistics about the activity in the specified time period, including:
+- Number of issues created
+- Number of pull requests created
+- Number of comments added
+- List of repositories included
+
+### Top Contributors
+
+Include a ranked list of the most active contributors in the report:
+
+```bash
+python gird_activity_report.py --top-contributors 10
+```
+
+This will show the top 10 contributors along with a breakdown of their activity (issues created, PRs submitted, and comments made).
+
+### Most Active Discussions
+
+Identify the "hottest" issues and PRs based on the amount of comment activity:
+
+```bash
+python gird_activity_report.py --hot-issues 5
+```
+
+This feature helps quickly identify the most active discussions that may need attention.
+
+### Time-based Chunking
+
+For large date ranges, you can split the report into smaller time chunks:
+
+```bash
+# Split a 30-day report into weekly chunks
+python gird_activity_report.py --days 30 --time-chunks 7
+```
+
+This will create separate reports for each time chunk, making the information more digestible. When using with `--output`, each chunk will be saved to a separate file.
+
+### GitHub Links
+
+All issues, PRs, and comments in the report now include direct links to their GitHub pages, making it easy to navigate to the original content.
+
+### References Section
+
+A consolidated references section at the end of each report provides a quick way to access all mentioned issues and PRs.
 
 ## Using with Claude AI
 
