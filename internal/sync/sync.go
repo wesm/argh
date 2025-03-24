@@ -116,30 +116,37 @@ func (s *Syncer) SyncRepository(ctx context.Context, owner, name string) error {
 		go func(workerID int) {
 			defer wg.Done()
 			
-			for issue := range issuesChan {
-				// Check if context was cancelled
-				if workerCtx.Err() != nil {
-					return
+			for ghIssue := range issuesChan {
+				select {
+				case <-ctx.Done():
+					return // Context canceled
+				default:
+					// Continue processing
 				}
 				
-				// Process the issue
-				err := s.processIssue(workerCtx, repo.ID, owner, name, issue)
-				
-				// Handle rate limit errors specially
-				var rateLimitErr *api.RateLimitError
-				if err != nil && errors.As(err, &rateLimitErr) {
-					// Signal rate limit hit to other workers with the reset time
-					select {
-					case rateLimitChan <- rateLimitErr.ResetTime:
-						// Successfully sent rate limit signal
-					default:
-						// Channel buffer full, another worker already reported
+				// Process issue
+				err := s.processIssue(workerCtx, repo.ID, owner, name, ghIssue)
+				if err != nil {
+					// Check if it's a rate limit error
+					var rateLimitErr *api.RateLimitError
+					if errors.As(err, &rateLimitErr) {
+						// Signal rate limit hit to other workers with the reset time
+						select {
+						case rateLimitChan <- rateLimitErr.ResetTime:
+							// Successfully sent rate limit signal
+						default:
+							// Channel buffer full, another worker already reported
+						}
+						
+						// Log rate limit error immediately
+						log.Printf("Error: issue #%d: rate limit error: %v", ghIssue.GetNumber(), err)
+					} else {
+						// Log other errors immediately
+						log.Printf("Error: issue #%d: %v", ghIssue.GetNumber(), err)
 					}
 					
-					// Still record the error
-					errorsChan <- fmt.Errorf("issue #%d: rate limit error: %w", issue.GetNumber(), err)
-				} else if err != nil {
-					errorsChan <- fmt.Errorf("issue #%d: %w", issue.GetNumber(), err)
+					// Still record the error for counting purposes
+					errorsChan <- err
 				}
 				
 				// Update progress with mutex to avoid race conditions
@@ -198,25 +205,16 @@ func (s *Syncer) SyncRepository(ctx context.Context, owner, name string) error {
 	close(errorsChan)
 	close(rateLimitChan)
 	
-	// Check if there were any errors
-	errorCount := len(errorsChan)
+	// Count the total errors (already logged during processing)
+	errorCount := 0
+	for range errorsChan {
+		errorCount++
+	}
+	
 	if errorCount > 0 {
 		log.Printf("Completed with %d errors", errorCount)
-		
-		// Sample a few errors to display
-		sampleSize := 5
-		if errorCount < sampleSize {
-			sampleSize = errorCount
-		}
-		
-		log.Printf("Sample of errors encountered:")
-		for i := 0; i < sampleSize; i++ {
-			if err, ok := <-errorsChan; ok {
-				log.Printf("- %v", err)
-			}
-		}
 	}
-
+	
 	// Update the last sync time
 	if err := s.db.UpdateLastSyncTime(fullName, time.Now()); err != nil {
 		return fmt.Errorf("failed to update last sync time for %s: %w", fullName, err)
@@ -247,11 +245,15 @@ func (s *Syncer) processIssue(ctx context.Context, repoID int64, owner, name str
 		modelLabel := api.ConvertGitHubLabel(label)
 		labelID, err := s.db.SaveLabel(modelLabel)
 		if err != nil {
-			return fmt.Errorf("failed to save label %s: %w", *label.Name, err)
+			// Log the error but continue processing other labels
+			log.Printf("issue #%d: failed to save label %s: %v", issue.Number, *label.Name, err)
+			continue
 		}
 
 		if err := s.db.SaveIssueLabel(issue.ID, labelID); err != nil {
-			return fmt.Errorf("failed to save issue-label relationship: %w", err)
+			// Log the error but continue processing other labels
+			log.Printf("issue #%d: failed to save label %s association: %v", issue.Number, *label.Name, err)
+			continue
 		}
 	}
 
