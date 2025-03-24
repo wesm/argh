@@ -76,8 +76,11 @@ type Issue struct {
 	UpdatedAt githubv4.DateTime
 	ClosedAt  *githubv4.DateTime
 	Author    Actor
-	// Use a field to detect if issue is pull request
-	IsPullRequest githubv4.Boolean
+	// Check if this is a pull request by requesting the pull request URL field
+	// If the URL is not empty, it's a pull request
+	PullRequest struct {
+		URL githubv4.String
+	}
 	Comments struct {
 		Nodes []Comment
 		PageInfo struct {
@@ -274,7 +277,8 @@ func (c *GraphQLClient) fetchIssuesBatch(
 			UpdatedAt:     convertDateTime(issue.UpdatedAt),
 			ClosedAt:      convertNullableDateTime(issue.ClosedAt),
 			UserID:        userID,
-			IsPullRequest: bool(issue.IsPullRequest),
+			// Check if the pull request URL exists to determine if this is a PR
+			IsPullRequest: string(issue.PullRequest.URL) != "",
 		}
 
 		// Convert comments
