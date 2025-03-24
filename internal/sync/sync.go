@@ -29,7 +29,7 @@ func New(db *db.DB, client *api.GitHubClient) *Syncer {
 // SyncRepository syncs a repository's issues to the local database
 func (s *Syncer) SyncRepository(ctx context.Context, owner, name string) error {
 	fullName := fmt.Sprintf("%s/%s", owner, name)
-	
+
 	// Get the repository from GitHub
 	repo, err := s.client.GetRepository(ctx, owner, name)
 	if err != nil {
@@ -77,11 +77,6 @@ func (s *Syncer) SyncRepository(ctx context.Context, owner, name string) error {
 
 // processIssue processes a single issue and its related data
 func (s *Syncer) processIssue(ctx context.Context, repoID int64, owner, name string, ghIssue *github.Issue) error {
-	// Skip pull requests if the issue object represents a pull request
-	if ghIssue.IsPullRequest() {
-		return nil
-	}
-
 	// Save the issue creator
 	if ghIssue.User != nil {
 		user := api.ConvertGitHubUser(ghIssue.User)

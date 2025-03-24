@@ -55,6 +55,7 @@ func (db *DB) Initialize() error {
 		closed_at TIMESTAMP,
 		user_id INTEGER,
 		repository_id INTEGER NOT NULL,
+		is_pull_request BOOLEAN NOT NULL DEFAULT 0,
 		FOREIGN KEY (user_id) REFERENCES users(id),
 		FOREIGN KEY (repository_id) REFERENCES repositories(id),
 		UNIQUE(repository_id, number)
@@ -139,15 +140,16 @@ func (db *DB) SaveUser(user *models.User) error {
 // SaveIssue saves an issue to the database
 func (db *DB) SaveIssue(issue *models.Issue, repoID int64) error {
 	query := `
-	INSERT INTO issues (id, number, title, body, state, created_at, updated_at, closed_at, user_id, repository_id)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	INSERT INTO issues (id, number, title, body, state, created_at, updated_at, closed_at, user_id, repository_id, is_pull_request)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(repository_id, number) DO UPDATE SET
 		title = excluded.title,
 		body = excluded.body,
 		state = excluded.state,
 		updated_at = excluded.updated_at,
 		closed_at = excluded.closed_at,
-		user_id = excluded.user_id
+		user_id = excluded.user_id,
+		is_pull_request = excluded.is_pull_request
 	`
 
 	_, err := db.Exec(
@@ -162,6 +164,7 @@ func (db *DB) SaveIssue(issue *models.Issue, repoID int64) error {
 		issue.ClosedAt,
 		issue.UserID,
 		repoID,
+		issue.IsPullRequest,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to save issue: %w", err)

@@ -8,6 +8,7 @@ for offline analysis of issue data across repositories in your organization.
 
 - **Multiple Repository Support**: Track issues from any number of GitHub repositories
 - **Incremental Updates**: Efficiently sync only new or updated issues since the last sync
+- **Pull Request Support**: Store pull requests alongside issues with proper identification
 - **SQLite Database**: Lightweight, zero-configuration database stored in a single file
 - **Performance**: Written in Go for excellent performance characteristics
 - **Flexible Scheduling**: Run manually or via cron/scheduler for daily/weekly updates
@@ -103,11 +104,16 @@ The SQLite database contains the following tables:
 
 - `repositories`: Information about tracked repositories
 - `users`: GitHub users who created issues, comments, etc.
-- `issues`: Issue details including title, body, state, etc.
+- `issues`: Issue details including title, body, state, etc. (includes a flag to identify pull requests)
 - `comments`: Comments on issues
 - `labels`: Issue labels
 - `issue_labels`: Many-to-many relationship between issues and labels
 - `sync_metadata`: Tracks the last sync time for each repository
+
+The complete database schema is also available in the `sql/schema.sql` file for
+reference purposes. This file is provided for documentation and for use with
+external tools, but the application itself uses the embedded schema in the code
+to ensure it remains a single self-contained binary.
 
 ## Scheduling Incremental Updates
 
@@ -136,6 +142,9 @@ Once you have synced your repositories, you can run SQL queries against the data
 -- Count issues by state
 SELECT state, COUNT(*) FROM issues GROUP BY state;
 
+-- Count issues vs pull requests
+SELECT is_pull_request, COUNT(*) FROM issues GROUP BY is_pull_request;
+
 -- Find issues with the most comments
 SELECT i.number, i.title, COUNT(c.id) as comment_count
 FROM issues i
@@ -150,6 +159,12 @@ FROM issues i
 JOIN issue_labels il ON i.id = il.issue_id
 JOIN labels l ON il.label_id = l.id
 WHERE l.name = 'bug';
+
+-- Find open pull requests
+SELECT number, title, created_at
+FROM issues
+WHERE is_pull_request = 1 AND state = 'open'
+ORDER BY created_at DESC;
 ```
 
 ## Contributing

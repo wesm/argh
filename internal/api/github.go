@@ -133,15 +133,16 @@ func ConvertGitHubIssue(issue *github.Issue) *models.Issue {
 	}
 
 	return &models.Issue{
-		ID:        issue.GetID(),
-		Number:    issue.GetNumber(),
-		Title:     issue.GetTitle(),
-		Body:      issue.GetBody(),
-		State:     issue.GetState(),
-		CreatedAt: issue.GetCreatedAt().Time,
-		UpdatedAt: issue.GetUpdatedAt().Time,
-		ClosedAt:  closedAt,
-		UserID:    userID,
+		ID:            issue.GetID(),
+		Number:        issue.GetNumber(),
+		Title:         issue.GetTitle(),
+		Body:          issue.GetBody(),
+		State:         issue.GetState(),
+		CreatedAt:     issue.GetCreatedAt().Time,
+		UpdatedAt:     issue.GetUpdatedAt().Time,
+		ClosedAt:      closedAt,
+		UserID:        userID,
+		IsPullRequest: issue.IsPullRequest(),
 	}
 }
 

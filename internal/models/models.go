@@ -21,15 +21,16 @@ type User struct {
 
 // Issue represents a GitHub issue
 type Issue struct {
-	ID        int64
-	Number    int
-	Title     string
-	Body      string
-	State     string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	ClosedAt  *time.Time
-	UserID    int64
+	ID            int64
+	Number        int
+	Title         string
+	Body          string
+	State         string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	ClosedAt      *time.Time
+	UserID        int64
+	IsPullRequest bool
 }
 
 // Comment represents a GitHub issue comment
