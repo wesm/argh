@@ -29,7 +29,7 @@ func New(db *db.DB, client *api.GitHubClient) *Syncer {
 // SyncRepository syncs a repository's issues to the local database
 func (s *Syncer) SyncRepository(ctx context.Context, owner, name string) error {
 	fullName := fmt.Sprintf("%s/%s", owner, name)
-
+	
 	// Get the repository from GitHub
 	repo, err := s.client.GetRepository(ctx, owner, name)
 	if err != nil {
@@ -50,15 +50,29 @@ func (s *Syncer) SyncRepository(ctx context.Context, owner, name string) error {
 	log.Printf("Syncing repository %s (last sync: %v)", fullName, lastSyncTime)
 
 	// Get issues updated since the last sync
+	log.Printf("Fetching issues from GitHub for %s...", fullName)
 	issues, err := s.client.GetIssues(ctx, owner, name, lastSyncTime)
 	if err != nil {
 		return fmt.Errorf("failed to get issues for %s: %w", fullName, err)
 	}
 
-	log.Printf("Found %d issues updated since last sync", len(issues))
+	totalIssues := len(issues)
+	log.Printf("Found %d issues updated since last sync", totalIssues)
 
-	// Process each issue
-	for _, issue := range issues {
+	if totalIssues == 0 {
+		log.Printf("No issues to sync for %s", fullName)
+		return nil
+	}
+
+	// Process each issue with progress indicator
+	for i, issue := range issues {
+		// Show progress every 10 issues or for the first/last issue
+		if i == 0 || i == totalIssues-1 || i%10 == 0 {
+			log.Printf("Processing issue %d/%d (%.1f%%) - #%d: %s", 
+				i+1, totalIssues, float64(i+1)/float64(totalIssues)*100.0, 
+				issue.GetNumber(), issue.GetTitle())
+		}
+
 		if err := s.processIssue(ctx, repo.ID, owner, name, issue); err != nil {
 			log.Printf("Error processing issue #%d: %v", issue.GetNumber(), err)
 			// Continue with other issues even if one fails
@@ -71,7 +85,7 @@ func (s *Syncer) SyncRepository(ctx context.Context, owner, name string) error {
 		return fmt.Errorf("failed to update last sync time for %s: %w", fullName, err)
 	}
 
-	log.Printf("Successfully synced repository %s", fullName)
+	log.Printf("Successfully synced repository %s (%d issues processed)", fullName, totalIssues)
 	return nil
 }
 

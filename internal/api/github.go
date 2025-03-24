@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -63,20 +64,27 @@ func (c *GitHubClient) GetIssues(ctx context.Context, owner, name string, since 
 		opts.Since = since
 	}
 
+	pageCount := 0
 	for {
+		pageCount++
+		if pageCount%5 == 0 || pageCount == 1 {
+			log.Printf("Fetching page %d of issues for %s/%s...", pageCount, owner, name)
+		}
+		
 		issues, resp, err := c.client.Issues.ListByRepo(ctx, owner, name, opts)
 		if err != nil {
 			return nil, fmt.Errorf("failed to list issues: %w", err)
 		}
 
 		allIssues = append(allIssues, issues...)
-
+		
 		if resp.NextPage == 0 {
 			break
 		}
 		opts.Page = resp.NextPage
 	}
 
+	log.Printf("Completed fetching %d pages of issues for %s/%s", pageCount, owner, name)
 	return allIssues, nil
 }
 
