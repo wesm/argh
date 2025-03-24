@@ -33,11 +33,11 @@ func main() {
 
 	// Check if we need to perform any operations that require the config
 	needConfig := *addRepo != "" || *syncAll || *syncRepo != ""
-	
+
 	// Only load configuration if needed
 	var cfg *config.Config
 	var err error
-	
+
 	if needConfig {
 		// Load configuration
 		cfg, err = config.LoadConfig(*configPath)

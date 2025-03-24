@@ -16,10 +16,10 @@ const (
 type Config struct {
 	// GitHub API token for authentication (optional, can be set via GIRD_GITHUB_TOKEN env var)
 	GitHubToken string `json:"github_token"`
-	
+
 	// Path to the SQLite database file
 	DatabasePath string `json:"database_path"`
-	
+
 	// List of repositories to sync in the format "owner/name"
 	Repositories []string `json:"repositories"`
 }
@@ -78,9 +78,9 @@ func CreateDefaultConfig(path string) error {
 
 	// Create default config
 	config := &Config{
-		GitHubToken:   "",
-		DatabasePath:  "github_issues.db",
-		Repositories:  []string{"example/repo"},
+		GitHubToken:  "",
+		DatabasePath: "github_issues.db",
+		Repositories: []string{"example/repo"},
 	}
 
 	// Ensure the directory exists

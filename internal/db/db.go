@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/wesm/github-issue-digest/internal/models"
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/wesm/github-issue-digest/internal/models"
 )
 
 // DB represents the database connection
@@ -251,7 +251,7 @@ func (db *DB) SaveIssueLabel(issueID, labelID int64) error {
 func (db *DB) GetLastSyncTime(repoFullName string) (time.Time, error) {
 	var lastSyncTime time.Time
 	query := `SELECT last_sync_time FROM sync_metadata WHERE repository = ?`
-	
+
 	err := db.QueryRow(query, repoFullName).Scan(&lastSyncTime)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -284,7 +284,7 @@ func (db *DB) UpdateLastSyncTime(repoFullName string, syncTime time.Time) error 
 // GetRepositoryByFullName gets a repository by its full name
 func (db *DB) GetRepositoryByFullName(fullName string) (*models.Repository, error) {
 	query := `SELECT id, owner, name, full_name FROM repositories WHERE full_name = ?`
-	
+
 	var repo models.Repository
 	err := db.QueryRow(query, fullName).Scan(&repo.ID, &repo.Owner, &repo.Name, &repo.FullName)
 	if err != nil {
