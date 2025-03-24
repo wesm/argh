@@ -100,10 +100,8 @@ func (c *GitHubClient) GetIssueComments(ctx context.Context, owner, name string,
 	pageCount := 0
 	for {
 		pageCount++
-		// Only log on the first page or every 5 pages to avoid log spam
-		if pageCount == 1 || pageCount%5 == 0 {
-			log.Printf("Fetching page %d of comments for issue #%d in %s/%s", pageCount, issueNumber, owner, name)
-		}
+		// We'll completely eliminate per-issue comment fetching logs
+		// to avoid spamming the console in parallel mode
 		
 		comments, resp, err := c.client.Issues.ListComments(ctx, owner, name, issueNumber, opts)
 		if err != nil {
@@ -118,8 +116,9 @@ func (c *GitHubClient) GetIssueComments(ctx context.Context, owner, name string,
 		opts.Page = resp.NextPage
 	}
 
-	if pageCount > 1 {
-		log.Printf("Fetched %d pages with %d total comments for issue #%d", pageCount, len(allComments), issueNumber)
+	// Only log if there are multiple pages of comments or a large number of comments
+	if pageCount > 3 || len(allComments) > 50 {
+		log.Printf("Issue #%d: Fetched %d comments across %d pages", issueNumber, len(allComments), pageCount)
 	}
 
 	return allComments, nil

@@ -91,6 +91,8 @@ func (s *Syncer) SyncRepository(ctx context.Context, owner, name string) error {
 	// Create a mutex for thread-safe progress tracking
 	var progressMutex sync.Mutex
 	processed := 0
+	lastProgressUpdate := time.Now()
+	progressInterval := 5 * time.Second // Update progress at most every 5 seconds
 	
 	// Create a channel to collect errors
 	errorsChan := make(chan error, totalIssues)
@@ -110,11 +112,14 @@ func (s *Syncer) SyncRepository(ctx context.Context, owner, name string) error {
 				processed++
 				current := processed // Capture for logging
 				
-				// Show progress every 10 issues or for the first/last issue
-				if current == 1 || current == totalIssues || current%10 == 0 {
-					log.Printf("Processing issue %d/%d (%.1f%%) - #%d: %s", 
-						current, totalIssues, float64(current)/float64(totalIssues)*100.0, 
-						issue.GetNumber(), issue.GetTitle())
+				// Show progress based on time interval or at beginning/end
+				shouldLog := current == 1 || current == totalIssues || 
+					time.Since(lastProgressUpdate) >= progressInterval
+				
+				if shouldLog {
+					log.Printf("Progress: %d/%d issues (%.1f%%)", 
+						current, totalIssues, float64(current)/float64(totalIssues)*100.0)
+					lastProgressUpdate = time.Now()
 				}
 				progressMutex.Unlock()
 				
