@@ -22,7 +22,6 @@ func main() {
 		syncAll         bool
 		syncRepo        string
 		workers         int
-		useGraphQL      bool
 	)
 	flag.StringVar(&configPath, "config", "config.json", "Path to configuration file")
 	flag.BoolVar(&createConfig, "init", false, "Create a default configuration file if it doesn't exist")
@@ -30,7 +29,6 @@ func main() {
 	flag.BoolVar(&syncAll, "sync-all", false, "Sync all repositories in the configuration")
 	flag.StringVar(&syncRepo, "sync-repo", "", "Sync a specific repository (format: owner/name)")
 	flag.IntVar(&workers, "workers", 5, "Number of worker goroutines for syncing repositories")
-	flag.BoolVar(&useGraphQL, "graphql", false, "Use GraphQL API instead of REST API")
 	flag.Parse()
 
 	// Create default configuration if requested
@@ -105,7 +103,6 @@ func main() {
 		fmt.Println("  -sync-all               Sync all repositories in the configuration")
 		fmt.Println("  -sync-repo <owner/name> Sync a specific repository")
 		fmt.Println("  -workers <num>          Number of worker goroutines for syncing repositories (default: 5)")
-		fmt.Println("  -graphql                Use GraphQL API instead of REST API")
 		fmt.Println()
 		fmt.Println("EXAMPLES:")
 		fmt.Println("  ./gird -init                           # Create default config.json")
@@ -144,8 +141,8 @@ func main() {
 		log.Fatalf("GitHub token not found. Please set the GIRD_GITHUB_TOKEN environment variable or add it to the configuration file.")
 	}
 
-	// Initialize syncer
-	syncer := sync.NewSyncer(database, token, workers, useGraphQL)
+	// Initialize syncer - always use REST API
+	syncer := sync.NewSyncer(database, token, workers, false)
 
 	// Sync repositories
 	ctx := context.Background()

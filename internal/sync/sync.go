@@ -12,31 +12,23 @@ import (
 	"github.com/google/go-github/v57/github"
 	"github.com/wesm/github-issue-digest/internal/api"
 	"github.com/wesm/github-issue-digest/internal/db"
-	"github.com/wesm/github-issue-digest/internal/models"
 )
 
 // Syncer represents a syncer for syncing GitHub issues to a local database
 type Syncer struct {
-	db           *db.DB
-	restClient   *api.GitHubClient
-	graphQLClient *api.GraphQLClient
-	workers      int
-	useGraphQL   bool
+	db         *db.DB
+	restClient *api.GitHubClient
+	workers    int
 }
 
 // NewSyncer creates a new syncer
-func NewSyncer(db *db.DB, token string, workers int, useGraphQL bool) *Syncer {
+func NewSyncer(db *db.DB, token string, workers int, _ bool) *Syncer {
+	// We're ignoring the GraphQL flag parameter (kept for backward compatibility)
 	restClient := api.NewGitHubClient(token)
-	var graphQLClient *api.GraphQLClient
-	if useGraphQL {
-		graphQLClient = api.NewGraphQLClient(token)
-	}
 	return &Syncer{
-		db:           db,
-		restClient:   restClient,
-		graphQLClient: graphQLClient,
-		workers:      workers,
-		useGraphQL:   useGraphQL,
+		db:         db,
+		restClient: restClient,
+		workers:    workers,
 	}
 }
 
@@ -55,16 +47,8 @@ func (s *Syncer) SetWorkers(workers int) {
 func (s *Syncer) SyncRepository(ctx context.Context, owner, name string) error {
 	fullName := fmt.Sprintf("%s/%s", owner, name)
 	
-	var repo *models.Repository
-	var err error
-	
 	// Get the repository information
-	if s.useGraphQL {
-		repo, err = s.graphQLClient.GetRepository(ctx, owner, name)
-	} else {
-		repo, err = s.restClient.GetRepository(ctx, owner, name)
-	}
-	
+	repo, err := s.restClient.GetRepository(ctx, owner, name)
 	if err != nil {
 		return fmt.Errorf("failed to get repository %s: %w", fullName, err)
 	}
@@ -82,99 +66,6 @@ func (s *Syncer) SyncRepository(ctx context.Context, owner, name string) error {
 
 	log.Printf("Syncing repository %s (last sync: %v)", fullName, lastSyncTime)
 
-	// If using GraphQL, use the more efficient path
-	if s.useGraphQL {
-		return s.syncWithGraphQL(ctx, repo, owner, name, lastSyncTime)
-	}
-	
-	// Otherwise, use the existing REST API path
-	return s.syncWithREST(ctx, repo, owner, name, lastSyncTime)
-}
-
-// syncWithGraphQL syncs a repository using the GraphQL API
-func (s *Syncer) syncWithGraphQL(ctx context.Context, repo *models.Repository, owner, name string, lastSyncTime time.Time) error {
-	fullName := fmt.Sprintf("%s/%s", owner, name)
-	
-	// Fetch issues and their comments in a single operation
-	log.Printf("Fetching issues and comments using GraphQL API for %s...", fullName)
-	issuesWithComments, err := s.graphQLClient.GetIssuesWithComments(ctx, owner, name, lastSyncTime)
-	if err != nil {
-		return fmt.Errorf("failed to get issues with comments: %w", err)
-	}
-	
-	totalIssues := len(issuesWithComments)
-	log.Printf("Found %d issues updated since last sync", totalIssues)
-	
-	if totalIssues == 0 {
-		log.Printf("No issues to sync for %s", fullName)
-		// Update the last sync time even if no issues were found
-		if err := s.db.UpdateLastSyncTime(fullName, time.Now()); err != nil {
-			return fmt.Errorf("failed to update last sync time for %s: %w", fullName, err)
-		}
-		return nil
-	}
-	
-	// Track progress
-	processed := 0
-	lastProgressUpdate := time.Now()
-	progressInterval := 5 * time.Second
-	
-	// Process each issue with its comments
-	log.Printf("Processing %d issues...", totalIssues)
-	for _, issueWithComments := range issuesWithComments {
-		issue := issueWithComments.Issue
-		
-		// Save the issue
-		if err := s.db.SaveIssue(issue, repo.ID); err != nil {
-			return fmt.Errorf("failed to save issue #%d: %w", issue.Number, err)
-		}
-		
-		// Save comments
-		for _, comment := range issueWithComments.Comments {
-			// Ensure issue ID is set
-			comment.IssueID = issue.ID
-			
-			if err := s.db.SaveComment(comment); err != nil {
-				return fmt.Errorf("failed to save comment for issue #%d: %w", issue.Number, err)
-			}
-		}
-		
-		// Save labels
-		for _, label := range issueWithComments.Labels {
-			var labelID int64
-			var labelErr error
-			
-			if labelID, labelErr = s.db.SaveLabel(label); labelErr != nil {
-				return fmt.Errorf("failed to save label %s: %w", label.Name, labelErr)
-			}
-			
-			if err := s.db.SaveIssueLabel(issue.ID, labelID); err != nil {
-				return fmt.Errorf("failed to save issue label for issue #%d: %w", issue.Number, err)
-			}
-		}
-		
-		// Update progress periodically
-		processed++
-		if processed == 1 || processed == totalIssues || time.Since(lastProgressUpdate) >= progressInterval {
-			log.Printf("Progress: %d/%d issues (%.1f%%)", 
-				processed, totalIssues, float64(processed)/float64(totalIssues)*100.0)
-			lastProgressUpdate = time.Now()
-		}
-	}
-	
-	// Update the last sync time
-	if err := s.db.UpdateLastSyncTime(fullName, time.Now()); err != nil {
-		return fmt.Errorf("failed to update last sync time for %s: %w", fullName, err)
-	}
-	
-	log.Printf("Successfully synced repository %s (%d issues processed)", fullName, totalIssues)
-	return nil
-}
-
-// syncWithREST syncs a repository using the REST API
-func (s *Syncer) syncWithREST(ctx context.Context, repo *models.Repository, owner, name string, lastSyncTime time.Time) error {
-	fullName := fmt.Sprintf("%s/%s", owner, name)
-
 	// Get issues updated since the last sync
 	log.Printf("Fetching issues from GitHub for %s...", fullName)
 	issues, err := s.restClient.GetIssues(ctx, owner, name, lastSyncTime)
@@ -187,6 +78,10 @@ func (s *Syncer) syncWithREST(ctx context.Context, repo *models.Repository, owne
 
 	if totalIssues == 0 {
 		log.Printf("No issues to sync for %s", fullName)
+		// Update the last sync time even if no issues were found
+		if err := s.db.UpdateLastSyncTime(fullName, time.Now()); err != nil {
+			return fmt.Errorf("failed to update last sync time for %s: %w", fullName, err)
+		}
 		return nil
 	}
 
