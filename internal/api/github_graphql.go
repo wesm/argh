@@ -41,28 +41,20 @@ type Repository struct {
 type Actor struct {
 	Login     githubv4.String
 	AvatarURL githubv4.String
-	// Use inline fragments to access databaseId from different user types
-	// We need to define fragments for all possible types that implement Actor interface
-	UserDatabaseID  githubv4.Int `graphql:"... on User { databaseId }"`
-	BotDatabaseID   githubv4.Int `graphql:"... on Bot { databaseId }"`
-	MannequinDatabaseID githubv4.Int `graphql:"... on Mannequin { databaseId }"`
+	// Instead of trying to access databaseId directly, let's use the Node interface's ID
+	// which is available on all types
+	ID githubv4.ID
 }
 
-// getDatabaseID safely extracts the database ID from an Actor
+// getDatabaseID safely extracts an ID from an Actor
 func getDatabaseID(actor Actor) int64 {
-	// Try different actor types
-	if actor.UserDatabaseID > 0 {
-		return int64(actor.UserDatabaseID)
+	// Convert the GraphQL global ID to a local numeric ID
+	// If we can't get a valid ID, generate one from the login
+	id := convertID(actor.ID)
+	if id <= 0 {
+		return generatePseudoID(string(actor.Login))
 	}
-	if actor.BotDatabaseID > 0 {
-		return int64(actor.BotDatabaseID)
-	}
-	if actor.MannequinDatabaseID > 0 {
-		return int64(actor.MannequinDatabaseID)
-	}
-	
-	// Fallback to hash of login if no ID found
-	return generatePseudoID(string(actor.Login))
+	return id
 }
 
 // Issue represents a GitHub issue in GraphQL
