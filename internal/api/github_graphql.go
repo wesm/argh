@@ -76,11 +76,10 @@ type Issue struct {
 	UpdatedAt githubv4.DateTime
 	ClosedAt  *githubv4.DateTime
 	Author    Actor
-	// Check if this is a pull request by requesting the pull request URL field
-	// If the URL is not empty, it's a pull request
-	PullRequest struct {
-		URL githubv4.String
-	}
+	// Use __typename to determine if this is a pull request
+	// In the GitHub GraphQL API schema, both Issue and PullRequest share the same fields
+	// but have different __typename values
+	TypeName  githubv4.String `graphql:"__typename"`
 	Comments struct {
 		Nodes []Comment
 		PageInfo struct {
@@ -277,8 +276,8 @@ func (c *GraphQLClient) fetchIssuesBatch(
 			UpdatedAt:     convertDateTime(issue.UpdatedAt),
 			ClosedAt:      convertNullableDateTime(issue.ClosedAt),
 			UserID:        userID,
-			// Check if the pull request URL exists to determine if this is a PR
-			IsPullRequest: string(issue.PullRequest.URL) != "",
+			// Check the __typename to determine if this is a pull request
+			IsPullRequest: string(issue.TypeName) == "PullRequest",
 		}
 
 		// Convert comments
