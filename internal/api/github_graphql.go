@@ -41,20 +41,15 @@ type Repository struct {
 type Actor struct {
 	Login     githubv4.String
 	AvatarURL githubv4.String
-	// Instead of trying to access databaseId directly, let's use the Node interface's ID
-	// which is available on all types
-	ID githubv4.ID
+	// We can't reliably access ID or databaseId across all Actor implementations
+	// so we'll just use the login name
 }
 
-// getDatabaseID safely extracts an ID from an Actor
+// getDatabaseID generates a consistent ID from an Actor
 func getDatabaseID(actor Actor) int64 {
-	// Convert the GraphQL global ID to a local numeric ID
-	// If we can't get a valid ID, generate one from the login
-	id := convertID(actor.ID)
-	if id <= 0 {
-		return generatePseudoID(string(actor.Login))
-	}
-	return id
+	// Generate a pseudo-ID based on login
+	// This ensures consistent IDs across API calls
+	return generatePseudoID(string(actor.Login))
 }
 
 // Issue represents a GitHub issue in GraphQL
