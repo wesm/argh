@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/go-github/v57/github"
@@ -16,14 +17,28 @@ import (
 type Syncer struct {
 	db     *db.DB
 	client *api.GitHubClient
+	// Default number of workers for parallel processing
+	workers int
 }
 
 // New creates a new syncer
 func New(db *db.DB, client *api.GitHubClient) *Syncer {
 	return &Syncer{
-		db:     db,
-		client: client,
+		db:      db,
+		client:  client,
+		workers: 5, // Default to 5 workers as a reasonable balance
 	}
+}
+
+// SetWorkers sets the number of parallel workers
+func (s *Syncer) SetWorkers(workers int) {
+	if workers < 1 {
+		workers = 1
+	}
+	if workers > 10 {
+		workers = 10 // Cap at 10 to avoid overwhelming GitHub API
+	}
+	s.workers = workers
 }
 
 // SyncRepository syncs a repository's issues to the local database
@@ -64,20 +79,68 @@ func (s *Syncer) SyncRepository(ctx context.Context, owner, name string) error {
 		return nil
 	}
 
-	// Process each issue with progress indicator
-	for i, issue := range issues {
-		// Show progress every 10 issues or for the first/last issue
-		if i == 0 || i == totalIssues-1 || i%10 == 0 {
-			log.Printf("Processing issue %d/%d (%.1f%%) - #%d: %s", 
-				i+1, totalIssues, float64(i+1)/float64(totalIssues)*100.0, 
-				issue.GetNumber(), issue.GetTitle())
-		}
-
-		if err := s.processIssue(ctx, repo.ID, owner, name, issue); err != nil {
-			log.Printf("Error processing issue #%d: %v", issue.GetNumber(), err)
-			// Continue with other issues even if one fails
-			continue
-		}
+	// Process issues in parallel using a worker pool
+	log.Printf("Processing issues with %d parallel workers", s.workers)
+	
+	// Create a channel to send issues to workers
+	issuesChan := make(chan *github.Issue, totalIssues)
+	
+	// Create a wait group to wait for all workers to finish
+	var wg sync.WaitGroup
+	
+	// Create a mutex for thread-safe progress tracking
+	var progressMutex sync.Mutex
+	processed := 0
+	
+	// Create a channel to collect errors
+	errorsChan := make(chan error, totalIssues)
+	
+	// Start worker goroutines
+	for i := 0; i < s.workers; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			
+			for issue := range issuesChan {
+				// Process the issue
+				err := s.processIssue(ctx, repo.ID, owner, name, issue)
+				
+				// Update progress with mutex to avoid race conditions
+				progressMutex.Lock()
+				processed++
+				current := processed // Capture for logging
+				
+				// Show progress every 10 issues or for the first/last issue
+				if current == 1 || current == totalIssues || current%10 == 0 {
+					log.Printf("Processing issue %d/%d (%.1f%%) - #%d: %s", 
+						current, totalIssues, float64(current)/float64(totalIssues)*100.0, 
+						issue.GetNumber(), issue.GetTitle())
+				}
+				progressMutex.Unlock()
+				
+				if err != nil {
+					log.Printf("Error processing issue #%d: %v", issue.GetNumber(), err)
+					errorsChan <- fmt.Errorf("issue #%d: %w", issue.GetNumber(), err)
+					// Continue with other issues even if one fails
+				}
+			}
+		}(i)
+	}
+	
+	// Send issues to the channel
+	for _, issue := range issues {
+		issuesChan <- issue
+	}
+	close(issuesChan)
+	
+	// Wait for all workers to finish
+	wg.Wait()
+	close(errorsChan)
+	
+	// Check if there were any errors
+	errorCount := len(errorsChan)
+	if errorCount > 0 {
+		log.Printf("Completed with %d errors", errorCount)
 	}
 
 	// Update the last sync time

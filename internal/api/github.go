@@ -97,7 +97,14 @@ func (c *GitHubClient) GetIssueComments(ctx context.Context, owner, name string,
 		},
 	}
 
+	pageCount := 0
 	for {
+		pageCount++
+		// Only log on the first page or every 5 pages to avoid log spam
+		if pageCount == 1 || pageCount%5 == 0 {
+			log.Printf("Fetching page %d of comments for issue #%d in %s/%s", pageCount, issueNumber, owner, name)
+		}
+		
 		comments, resp, err := c.client.Issues.ListComments(ctx, owner, name, issueNumber, opts)
 		if err != nil {
 			return nil, fmt.Errorf("failed to list comments: %w", err)
@@ -109,6 +116,10 @@ func (c *GitHubClient) GetIssueComments(ctx context.Context, owner, name string,
 			break
 		}
 		opts.Page = resp.NextPage
+	}
+
+	if pageCount > 1 {
+		log.Printf("Fetched %d pages with %d total comments for issue #%d", pageCount, len(allComments), issueNumber)
 	}
 
 	return allComments, nil
