@@ -1,77 +1,113 @@
 # GIRD Activity Report Generator
 
-This Python script interfaces with the GIRD (GitHub Issues Repo Database) SQLite database to generate activity reports for specific time ranges. The script can be used to analyze GitHub activity and optionally generate summaries using Claude AI via the chatlas package.
+This Python script interfaces with the GIRD (GitHub Issues Repo Database) SQLite database to generate activity reports for specific time ranges. The script can be used to analyze GitHub activity and optionally generate summaries using Large Language Models (LLMs) via APIs.
 
 ## Setup
 
 1. Install the required dependencies:
 
 ```bash
-pip install sqlite3 chatlas
+pip install sqlite3 click requests
 ```
 
 2. Make sure you have a GIRD database file. This is created by running the main GIRD tool to sync repositories.
 
-## Usage
+## Activity Reports
 
-The script provides several options to customize your activity report:
+The `gird_activity_report.py` script can generate GitHub activity reports from the GIRD database. It supports:
+
+- Filtering by date range or looking back a specific number of days
+- Filtering by specific repositories
+- Including top contributors and most active discussions
+- Splitting reports by time periods (chunks)
+- Sending reports to LLMs for summarization via APIs
+
+### Installation
 
 ```bash
-python gird_activity_report.py [options]
+pip install click requests
+```
+
+### Usage
+
+The script uses Click to provide a more modern and user-friendly command-line interface:
+
+```bash
+# List available repositories
+python gird_activity_report.py list-repositories --db github_issues.db
+
+# Generate a report
+python gird_activity_report.py generate-report [OPTIONS]
 ```
 
 ### Options
 
-- `--db PATH`: Path to the GIRD SQLite database (default: `github_issues.db`)
-- `--days N`: Number of days to look back (default: 7)
-- `--start-date DATE`: Start date in YYYY-MM-DD format
-- `--end-date DATE`: End date in YYYY-MM-DD format
-- `--repos REPO [REPO ...]`: Specific repositories to filter by (in owner/name format)
-- `--list-repos`: List all repositories in the database
-- `--output FILE`: Output file for the report (default: print to stdout)
-- `--top-contributors N`: Number of top contributors to include (default: 10, 0 to disable)
-- `--hot-issues N`: Number of most active issues to include (default: 5, 0 to disable)
-- `--chunk-size N`: Maximum characters per chunk for large reports (default: 20000)
-- `--time-chunks N`: Split report into time chunks of specified days (optional)
-- `--claude`: Send the report to Claude for summarization
-- `--claude-key KEY`: Claude API key
-- `--claude-prompt PROMPT`: Custom prompt for Claude
+```bash
+# Common options
+--db TEXT                  Path to the GIRD SQLite database (default: github_issues.db)
+
+# List repositories command
+python gird_activity_report.py list-repositories [OPTIONS]
+  --db TEXT                Path to the GIRD SQLite database (default: github_issues.db)
+
+# Generate report command
+python gird_activity_report.py generate-report [OPTIONS]
+  --db TEXT                Path to the GIRD SQLite database (default: github_issues.db)
+  --days INTEGER           Number of days to look back (default: 7)
+  --start-date TEXT        Start date (YYYY-MM-DD)
+  --end-date TEXT          End date (YYYY-MM-DD)
+  --repos TEXT             Specific repositories to filter by (owner/name format). Can be used multiple times.
+  --output TEXT            Output file for the report (default: stdout)
+  --top-contributors INTEGER  Number of top contributors to include (default: 10, 0 to disable)
+  --hot-issues INTEGER     Number of most active issues to include (default: 5, 0 to disable)
+  --chunk-size INTEGER     Maximum characters per chunk for large reports (default: 20000)
+  --time-chunks INTEGER    Split report into time chunks of specified days (optional)
+  --llm                    Send the report to an LLM for summarization
+  --llm-key TEXT           LLM API key
+  --llm-model TEXT         Model name to use (default: claude-3-opus-20240229)
+  --llm-prompt TEXT        Custom prompt for the LLM
+```
 
 ### Examples
 
 List all repositories in the database:
 ```bash
-python gird_activity_report.py --list-repos --db github_issues.db
+python gird_activity_report.py list-repositories
 ```
 
-Generate a report for the last 7 days:
+Generate a report for the last 30 days:
 ```bash
-python gird_activity_report.py --db github_issues.db
+python gird_activity_report.py generate-report --days 30
 ```
 
 Generate a report for a specific date range:
 ```bash
-python gird_activity_report.py --start-date 2025-03-01 --end-date 2025-03-15
+python gird_activity_report.py generate-report --start-date 2023-01-01 --end-date 2023-01-31
 ```
 
-Filter by specific repositories:
+Generate a report for specific repositories:
 ```bash
-python gird_activity_report.py --repos posit-dev/positron wesm/pandas
+python gird_activity_report.py generate-report --repos owner/repo1 --repos owner/repo2
 ```
 
-Save the report to a file:
+Generate a report with custom options and save to file:
 ```bash
-python gird_activity_report.py --output activity_report.md
+python gird_activity_report.py generate-report --days 14 --top-contributors 5 --hot-issues 3 --output report.md
 ```
 
-Generate a report with top 5 contributors and top 10 hot issues:
+Split activity into weekly chunks:
 ```bash
-python gird_activity_report.py --top-contributors 5 --hot-issues 10
+python gird_activity_report.py generate-report --days 30 --time-chunks 7
 ```
 
-Break a large time period into weekly chunks:
+Generate a report and send to an LLM for summarization:
 ```bash
-python gird_activity_report.py --days 30 --time-chunks 7
+python gird_activity_report.py generate-report --days 14 --llm --llm-key your_api_key
+```
+
+Use a different LLM model:
+```bash
+python gird_activity_report.py generate-report --days 14 --llm --llm-model claude-3-sonnet-20240229
 ```
 
 ## Enhanced Report Features
@@ -91,7 +127,7 @@ Each report begins with an executive summary that provides high-level statistics
 Include a ranked list of the most active contributors in the report:
 
 ```bash
-python gird_activity_report.py --top-contributors 10
+python gird_activity_report.py generate-report --top-contributors 10
 ```
 
 This will show the top 10 contributors along with a breakdown of their activity (issues created, PRs submitted, and comments made).
@@ -101,7 +137,7 @@ This will show the top 10 contributors along with a breakdown of their activity 
 Identify the "hottest" issues and PRs based on the amount of comment activity:
 
 ```bash
-python gird_activity_report.py --hot-issues 5
+python gird_activity_report.py generate-report --hot-issues 5
 ```
 
 This feature helps quickly identify the most active discussions that may need attention.
@@ -112,7 +148,7 @@ For large date ranges, you can split the report into smaller time chunks:
 
 ```bash
 # Split a 30-day report into weekly chunks
-python gird_activity_report.py --days 30 --time-chunks 7
+python gird_activity_report.py generate-report --days 30 --time-chunks 7
 ```
 
 This will create separate reports for each time chunk, making the information more digestible. When using with `--output`, each chunk will be saved to a separate file.
@@ -125,75 +161,31 @@ All issues, PRs, and comments in the report now include direct links to their Gi
 
 A consolidated references section at the end of each report provides a quick way to access all mentioned issues and PRs.
 
-## Using with Claude AI
+## Using with LLMs
 
-To use Claude AI for summarizing activity reports, you need to:
+To use LLMs for summarizing activity reports, you need to:
 
-1. Get a Claude API key from [Anthropic](https://www.anthropic.com/)
-2. Install the `chatlas` package: `pip install chatlas`
-3. Use the `--claude` flag with your API key:
+1. Get an LLM API key from your chosen provider
+2. Install the required packages: `pip install requests`
+3. Use the `--llm` flag with your API key:
 
 ```bash
 # Using command line argument
-python gird_activity_report.py --claude --claude-key your_api_key
+python gird_activity_report.py generate-report --llm --llm-key your_api_key
 
 # Or using environment variable
-export CLAUDE_API_KEY=your_api_key
-python gird_activity_report.py --claude
+export LLM_API_KEY=your_api_key
+python gird_activity_report.py generate-report --llm
 ```
 
-You can also customize the prompt for Claude:
+You can also customize the prompt for the LLM:
 
 ```bash
-python gird_activity_report.py --claude --claude-prompt "Generate a concise summary of the following GitHub activity with emphasis on high-priority issues"
+python gird_activity_report.py generate-report --llm --llm-prompt "Generate a concise summary of the following GitHub activity with emphasis on high-priority issues"
 ```
-
-## Customizing Claude with Chatlas
-
-The `chatlas` package provides a simple interface to Claude's API. The script uses a basic implementation, but you can customize it further:
-
-1. Advanced message formatting:
-```python
-import chatlas
-
-client = chatlas.Client(api_key)
-messages = [
-    {"role": "user", "content": "Please analyze this GitHub activity: " + activity_data}
-]
-response = client.create_message(messages=messages)
-```
-
-2. Tool use with Claude:
-```python
-# Define tools (functions) that Claude can use
-tools = [
-    {
-        "name": "search_issues",
-        "description": "Search for GitHub issues",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string"},
-                "repository": {"type": "string"}
-            },
-            "required": ["query"]
-        }
-    }
-]
-
-# Enable tool use in the client
-client = chatlas.Client(api_key)
-response = client.send_message(
-    "Find all issues related to performance",
-    tools=tools,
-    tool_choice={"type": "auto"}
-)
-```
-
-For more details on tool use with Claude, refer to the [Anthropic documentation](https://docs.anthropic.com/claude/docs/tool-use).
 
 ## Notes
 
-- The script formats GitHub activity in a structured way for Claude to understand.
+- The script formats GitHub activity in a structured way for LLMs to understand.
 - Make sure your database is up-to-date by running GIRD sync before generating reports.
-- For large repositories, consider using date filters to avoid overwhelming Claude with too much data.
+- For large repositories, consider using date filters to avoid overwhelming LLMs with too much data.

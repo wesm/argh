@@ -5,13 +5,13 @@ GitHub Activity Report Generator for GIRD
 Generates reports for recent GitHub activity from a GIRD database.
 """
 
-import argparse
-import datetime
-import json
 import os
 import re
 import sqlite3
-from typing import Dict, List, Optional, Tuple, Union
+import datetime
+import json
+from typing import Dict, List, Optional, Tuple
+import click
 
 # Constants
 DEFAULT_DB_PATH = "github_issues.db"
@@ -400,7 +400,7 @@ class GirdDatabase:
         Split activity data into time-based chunks.
 
         Args:
-            activity (dict): Activity data dictionary with issues, prs, and comments
+            activity (dict): Activity data dictionary with issues, prs and comments
             days_per_chunk (int): Number of days for each chunk
 
         Returns:
@@ -487,9 +487,9 @@ class GirdDatabase:
         return chunks
 
 
-def chunk_report_for_claude(report, max_chars=20000):
+def chunk_report_for_llm(report, max_chars=20000):
     """
-    Split a large report into smaller chunks for Claude, trying to maintain section integrity.
+    Split a large report into smaller chunks for LLM processing, trying to maintain section integrity.
 
     Args:
         report (str): Full markdown report text
@@ -592,11 +592,11 @@ def chunk_report_for_claude(report, max_chars=20000):
     return chunks
 
 
-def format_activity_for_claude(
+def format_activity_for_report(
     activity, top_contributors=None, hot_issues=None, start_date=None, end_date=None
 ):
     """
-    Format the activity data for Claude AI consumption.
+    Format the activity data for LLM consumption.
 
     Args:
         activity: Activity dictionary with issues, prs and comments
@@ -606,7 +606,7 @@ def format_activity_for_claude(
         end_date: End date of the report period
 
     Returns:
-        Formatted markdown text suitable for sending to Claude
+        Formatted markdown text suitable for sending to an LLM
     """
     issues = activity.get("issues", [])
     prs = activity.get("prs", [])
@@ -768,8 +768,21 @@ def format_activity_for_claude(
     return "\n".join(output)
 
 
-def send_to_claude(report_text, api_key, custom_prompt=None):
-    """Send the report to Claude for summarization."""
+def send_to_llm(
+    report_text, api_key, model_name="claude-3-opus-20240229", custom_prompt=None
+):
+    """
+    Send the report to the specified LLM for summarization.
+
+    Args:
+        report_text: The text of the report to summarize
+        api_key: API key for the LLM service
+        model_name: The model name to use (default: "claude-3-opus-20240229")
+        custom_prompt: Optional custom prompt to use
+
+    Returns:
+        The LLM response
+    """
     try:
         import chatlas
     except ImportError:
@@ -780,10 +793,12 @@ def send_to_claude(report_text, api_key, custom_prompt=None):
     client = chatlas.Client(api_key)
 
     # Check if we need to chunk the report
-    report_chunks = chunk_report_for_claude(report_text)
+    report_chunks = chunk_report_for_llm(report_text)
 
     if len(report_chunks) > 1:
-        print(f"Report split into {len(report_chunks)} chunks for Claude processing")
+        print(
+            f"Report split into {len(report_chunks)} chunks for {model_name} processing"
+        )
 
         all_responses = []
         for i, chunk in enumerate(report_chunks):
@@ -792,20 +807,21 @@ def send_to_claude(report_text, api_key, custom_prompt=None):
             # Default prompt for chunked reports
             prompt = (
                 custom_prompt
-                or f"""
-            This is chunk {i + 1} of {len(report_chunks)} from a GitHub activity report.
+                or """
+            This is chunk {i}/{total} from a GitHub activity report.
             Please summarize the key activity in this chunk focusing on:
             1. Important issues and PRs
             2. Most active contributors
-            3. Common themes or patterns in the activity
+            3. Emerging patterns or trends
             
             Keep your summary concise and actionable.
-            """
+            """.format(i=i + 1, total=len(report_chunks))
             )
 
             try:
                 response = client.create_message(
-                    messages=[{"role": "user", "content": prompt + "\n\n" + chunk}]
+                    messages=[{"role": "user", "content": prompt + "\n\n" + chunk}],
+                    model=model_name,
                 )
                 all_responses.append(
                     f"--- Chunk {i + 1} Summary ---\n\n{response['content'][0]['text']}"
@@ -819,8 +835,7 @@ def send_to_claude(report_text, api_key, custom_prompt=None):
         # If custom final summary is requested, send combined summaries for final synthesis
         if len(all_responses) > 1:
             try:
-                final_prompt = """
-                Below are summaries of different chunks of a GitHub activity report.
+                final_prompt = """You've been given summaries of different time chunks from a GitHub activity report.
                 Please synthesize these into a single coherent summary that highlights the most important information.
                 Focus on key themes, most active contributors, and highest-impact issues/PRs across the whole period.
                 """
@@ -831,7 +846,8 @@ def send_to_claude(report_text, api_key, custom_prompt=None):
                             "role": "user",
                             "content": final_prompt + "\n\n" + combined_response,
                         }
-                    ]
+                    ],
+                    model=model_name,
                 )
 
                 return f"# Overall Summary\n\n{final_response['content'][0]['text']}\n\n# Individual Chunk Summaries\n\n{combined_response}"
@@ -849,8 +865,7 @@ def send_to_claude(report_text, api_key, custom_prompt=None):
         Please analyze this GitHub activity report and provide a concise summary that:
         1. Highlights the most significant issues and PRs
         2. Identifies the most active contributors and their focus areas
-        3. Notes any patterns or themes in the activity
-        4. Suggests any areas that might need attention based on the activity
+        3. Summarizes the overall trends and themes in the activity
 
         Your summary should help someone who's been away quickly understand what happened and what might need their attention.
         """
@@ -858,227 +873,257 @@ def send_to_claude(report_text, api_key, custom_prompt=None):
 
         try:
             response = client.create_message(
-                messages=[{"role": "user", "content": prompt + "\n\n" + report_text}]
+                messages=[{"role": "user", "content": prompt + "\n\n" + report_text}],
+                model=model_name,
             )
             return response["content"][0]["text"]
         except Exception as e:
             return f"Error: {str(e)}"
 
 
-def parse_args():
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(
-        description="Generate GitHub activity reports from GIRD database"
-    )
-    parser.add_argument(
-        "--db",
-        type=str,
-        default=DEFAULT_DB_PATH,
-        help=f"Path to the GIRD SQLite database (default: {DEFAULT_DB_PATH})",
-    )
-    parser.add_argument(
-        "--days",
-        type=int,
-        default=DEFAULT_DAYS,
-        help=f"Number of days to look back (default: {DEFAULT_DAYS})",
-    )
-    parser.add_argument("--start-date", type=str, help="Start date (YYYY-MM-DD)")
-    parser.add_argument("--end-date", type=str, help="End date (YYYY-MM-DD)")
-    parser.add_argument(
-        "--repos",
-        type=str,
-        nargs="*",
-        help="Specific repositories to filter by (owner/name format)",
-    )
-    parser.add_argument(
-        "--list-repos",
-        action="store_true",
-        help="List all repositories in the database",
-    )
-    parser.add_argument(
-        "--output", type=str, help="Output file for the report (default: stdout)"
-    )
-
-    # Enhanced reporting options
-    parser.add_argument(
-        "--top-contributors",
-        type=int,
-        default=10,
-        help="Number of top contributors to include (default: 10, 0 to disable)",
-    )
-    parser.add_argument(
-        "--hot-issues",
-        type=int,
-        default=5,
-        help="Number of most active issues to include (default: 5, 0 to disable)",
-    )
-    parser.add_argument(
-        "--chunk-size",
-        type=int,
-        default=20000,
-        help="Maximum characters per chunk for large reports (default: 20000)",
-    )
-    parser.add_argument(
-        "--time-chunks",
-        type=int,
-        help="Split report into time chunks of specified days (optional)",
-    )
-
-    # Claude integration
-    parser.add_argument(
-        "--claude",
-        action="store_true",
-        help="Send the report to Claude for summarization",
-    )
-    parser.add_argument("--claude-key", type=str, help="Claude API key")
-    parser.add_argument("--claude-prompt", type=str, help="Custom prompt for Claude")
-
-    return parser.parse_args()
+@click.group()
+def cli():
+    """GitHub Issues Repo Database (GIRD) Activity Report Generator."""
+    pass
 
 
-def main():
-    """Main function."""
-    args = parse_args()
+@cli.command()
+@click.option(
+    "--db",
+    default=DEFAULT_DB_PATH,
+    help=f"Path to the GIRD SQLite database (default: {DEFAULT_DB_PATH})",
+)
+@click.option(
+    "--list-repos", is_flag=True, help="List all repositories in the database"
+)
+def list_repositories(db, list_repos):
+    """List all repositories in the GIRD database."""
+    with GirdDatabase(db) as gird_db:
+        repos = gird_db.get_repository_names()
+        click.echo("Repositories in database:")
+        for repo in repos:
+            click.echo(f"  - {repo}")
 
+
+@cli.command()
+@click.option(
+    "--db",
+    default=DEFAULT_DB_PATH,
+    help=f"Path to the GIRD SQLite database (default: {DEFAULT_DB_PATH})",
+)
+@click.option(
+    "--days",
+    default=DEFAULT_DAYS,
+    type=int,
+    help=f"Number of days to look back (default: {DEFAULT_DAYS})",
+)
+@click.option("--start-date", help="Start date (YYYY-MM-DD)")
+@click.option("--end-date", help="End date (YYYY-MM-DD)")
+@click.option(
+    "--repos",
+    multiple=True,
+    help="Specific repositories to filter by (owner/name format). Can be used multiple times.",
+)
+@click.option("--output", help="Output file for the report (default: stdout)")
+@click.option(
+    "--top-contributors",
+    default=10,
+    type=int,
+    help="Number of top contributors to include (default: 10, 0 to disable)",
+)
+@click.option(
+    "--hot-issues",
+    default=5,
+    type=int,
+    help="Number of most active issues to include (default: 5, 0 to disable)",
+)
+@click.option(
+    "--chunk-size",
+    default=20000,
+    type=int,
+    help="Maximum characters per chunk for large reports (default: 20000)",
+)
+@click.option(
+    "--time-chunks",
+    type=int,
+    help="Split report into time chunks of specified days (optional)",
+)
+@click.option("--llm", is_flag=True, help="Send the report to an LLM for summarization")
+@click.option("--llm-key", help="LLM API key")
+@click.option(
+    "--llm-model",
+    default="claude-3-opus-20240229",
+    help="Model name to use (default: claude-3-opus-20240229)",
+)
+@click.option("--llm-prompt", help="Custom prompt for the LLM")
+def generate_report(
+    db,
+    days,
+    start_date,
+    end_date,
+    repos,
+    output,
+    top_contributors,
+    hot_issues,
+    chunk_size,
+    time_chunks,
+    llm,
+    llm_key,
+    llm_model,
+    llm_prompt,
+):
+    """Generate a GitHub activity report from the GIRD database."""
     # Open database connection
-    with GirdDatabase(args.db) as db:
-        # List repositories if requested
-        if args.list_repos:
-            repos = db.get_repository_names()
-            print("Repositories in database:")
-            for repo in repos:
-                print(f"  - {repo}")
-            return
-
+    with GirdDatabase(db) as gird_db:
         # Determine date range
-        end_date = datetime.datetime.now()
-        if args.end_date:
-            end_date = datetime.datetime.strptime(args.end_date, "%Y-%m-%d")
+        end_date_obj = datetime.datetime.now()
+        if end_date:
+            end_date_obj = datetime.datetime.strptime(end_date, "%Y-%m-%d")
 
-        start_date = end_date - datetime.timedelta(days=args.days)
-        if args.start_date:
-            start_date = datetime.datetime.strptime(args.start_date, "%Y-%m-%d")
+        start_date_obj = end_date_obj - datetime.timedelta(days=days)
+        if start_date:
+            start_date_obj = datetime.datetime.strptime(start_date, "%Y-%m-%d")
 
         # Get activity data
-        activity = db.get_recent_activity(start_date, end_date, args.repos)
+        activity = gird_db.get_recent_activity(
+            start_date_obj, end_date_obj, list(repos) if repos else None
+        )
 
         # Check if we should use time-based chunking
-        if args.time_chunks and args.time_chunks > 0:
+        if time_chunks and time_chunks > 0:
             # Split activity by time chunks
-            time_chunks = db.chunk_activity_by_time(activity, args.time_chunks)
+            time_chunks_data = gird_db.chunk_activity_by_time(activity, time_chunks)
 
-            if not time_chunks:
-                print("No activity found in the specified time range.")
+            if not time_chunks_data:
+                click.echo("No activity found in the specified time range.")
                 return
 
             # Process each time chunk
-            for i, chunk in enumerate(time_chunks, 1):
+            for i, chunk in enumerate(time_chunks_data, 1):
                 chunk_start = chunk["start_date"]
                 chunk_end = chunk["end_date"]
                 chunk_data = chunk["data"]
 
-                print(f"\n{'=' * 80}")
-                print(
-                    f"Processing time chunk {i}/{len(time_chunks)}: {chunk_start.strftime('%Y-%m-%d')} to {chunk_end.strftime('%Y-%m-%d')}"
+                click.echo(f"\n{'=' * 80}")
+                click.echo(
+                    f"Processing time chunk {i}/{len(time_chunks_data)}: {chunk_start.strftime('%Y-%m-%d')} to {chunk_end.strftime('%Y-%m-%d')}"
                 )
-                print(f"{'=' * 80}")
+                click.echo(f"{'=' * 80}")
 
                 # Get top contributors and hot issues for this chunk if requested
-                top_contributors = None
-                if args.top_contributors > 0:
-                    top_contributors = db.get_top_contributors(
-                        chunk_start, chunk_end, args.repos, args.top_contributors
+                top_contributors_data = None
+                if top_contributors > 0:
+                    top_contributors_data = gird_db.get_top_contributors(
+                        chunk_start,
+                        chunk_end,
+                        list(repos) if repos else None,
+                        top_contributors,
                     )
 
-                hot_issues = None
-                if args.hot_issues > 0:
-                    hot_issues = db.get_hot_issues(
-                        chunk_start, chunk_end, args.repos, args.hot_issues
+                hot_issues_data = None
+                if hot_issues > 0:
+                    hot_issues_data = gird_db.get_hot_issues(
+                        chunk_start,
+                        chunk_end,
+                        list(repos) if repos else None,
+                        hot_issues,
                     )
 
                 # Format for output
-                chunk_report = format_activity_for_claude(
-                    chunk_data, top_contributors, hot_issues, chunk_start, chunk_end
+                chunk_report = format_activity_for_report(
+                    chunk_data,
+                    top_contributors_data,
+                    hot_issues_data,
+                    chunk_start,
+                    chunk_end,
                 )
 
                 # Output filename with chunk info
-                if args.output:
-                    base_name, ext = os.path.splitext(args.output)
+                if output:
+                    base_name, ext = os.path.splitext(output)
                     chunk_filename = f"{base_name}_chunk{i}{ext}"
                     with open(chunk_filename, "w") as f:
                         f.write(chunk_report)
-                    print(f"Chunk {i} report written to {chunk_filename}")
+                    click.echo(f"Chunk {i} report written to {chunk_filename}")
                 else:
-                    print(chunk_report)
+                    click.echo(chunk_report)
 
-                # Send to Claude if requested
-                if args.claude:
-                    if not args.claude_key:
-                        claude_key = os.environ.get("CLAUDE_API_KEY")
-                        if not claude_key:
-                            print(
-                                "Error: Claude API key not provided. Use --claude-key or set CLAUDE_API_KEY environment variable."
+                # Send to LLM if requested
+                if llm:
+                    if not llm_key:
+                        llm_key = os.environ.get("LLM_API_KEY")
+                        if not llm_key:
+                            click.echo(
+                                "Error: LLM API key not provided. Use --llm-key or set LLM_API_KEY environment variable.",
+                                err=True,
                             )
                             return
-                    else:
-                        claude_key = args.claude_key
 
-                    # Send to Claude and print response
-                    print(f"\nSending chunk {i} to Claude for analysis...")
-                    claude_response = send_to_claude(
-                        chunk_report, claude_key, args.claude_prompt
+                    # Send to LLM and print response
+                    click.echo(f"\nSending chunk {i} to {llm_model} for analysis...")
+                    llm_response = send_to_llm(
+                        chunk_report, llm_key, llm_model, llm_prompt
                     )
-                    print(f"\n--- Claude Summary for Chunk {i} ---\n")
-                    print(claude_response)
+                    click.echo(f"\n--- {llm_model} Summary for Chunk {i} ---\n")
+                    click.echo(llm_response)
         else:
             # Process the entire date range as a single report
 
             # Get top contributors and hot issues if requested
-            top_contributors = None
-            if args.top_contributors > 0:
-                top_contributors = db.get_top_contributors(
-                    start_date, end_date, args.repos, args.top_contributors
+            top_contributors_data = None
+            if top_contributors > 0:
+                top_contributors_data = gird_db.get_top_contributors(
+                    start_date_obj,
+                    end_date_obj,
+                    list(repos) if repos else None,
+                    top_contributors,
                 )
 
-            hot_issues = None
-            if args.hot_issues > 0:
-                hot_issues = db.get_hot_issues(
-                    start_date, end_date, args.repos, args.hot_issues
+            hot_issues_data = None
+            if hot_issues > 0:
+                hot_issues_data = gird_db.get_hot_issues(
+                    start_date_obj,
+                    end_date_obj,
+                    list(repos) if repos else None,
+                    hot_issues,
                 )
 
             # Format for output
-            formatted_report = format_activity_for_claude(
-                activity, top_contributors, hot_issues, start_date, end_date
+            formatted_report = format_activity_for_report(
+                activity,
+                top_contributors_data,
+                hot_issues_data,
+                start_date_obj,
+                end_date_obj,
             )
 
             # Output the report
-            if args.output:
-                with open(args.output, "w") as f:
+            if output:
+                with open(output, "w") as f:
                     f.write(formatted_report)
-                print(f"Report written to {args.output}")
+                click.echo(f"Report written to {output}")
             else:
-                print(formatted_report)
+                click.echo(formatted_report)
 
-            # Send to Claude if requested
-            if args.claude:
-                if not args.claude_key:
-                    claude_key = os.environ.get("CLAUDE_API_KEY")
-                    if not claude_key:
-                        print(
-                            "Error: Claude API key not provided. Use --claude-key or set CLAUDE_API_KEY environment variable."
+            # Send to LLM if requested
+            if llm:
+                if not llm_key:
+                    llm_key = os.environ.get("LLM_API_KEY")
+                    if not llm_key:
+                        click.echo(
+                            "Error: LLM API key not provided. Use --llm-key or set LLM_API_KEY environment variable.",
+                            err=True,
                         )
                         return
-                else:
-                    claude_key = args.claude_key
 
-                # Use the chunking mechanism for Claude if the report is large
-                print("\nSending report to Claude for analysis...")
-                claude_response = send_to_claude(
-                    formatted_report, claude_key, args.claude_prompt
+                # Use the chunking mechanism for LLM if the report is large
+                click.echo(f"\nSending report to {llm_model} for analysis...")
+                llm_response = send_to_llm(
+                    formatted_report, llm_key, llm_model, llm_prompt
                 )
-                print("\n--- Claude Summary ---\n")
-                print(claude_response)
+                click.echo(f"\n--- {llm_model} Summary ---\n")
+                click.echo(llm_response)
 
 
 if __name__ == "__main__":
-    main()
+    cli()
