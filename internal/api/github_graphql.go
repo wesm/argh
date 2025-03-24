@@ -41,8 +41,8 @@ type Repository struct {
 type Actor struct {
 	Login     githubv4.String
 	AvatarURL githubv4.String
-	// Use fragments to access different implementations of Actor
-	DatabaseID *githubv4.Int `graphql:"... on User { databaseId }"`
+	// Use a proper field to access databaseId
+	DatabaseID githubv4.Int `graphql:"databaseId"`
 }
 
 // Issue represents a GitHub issue in GraphQL
@@ -56,10 +56,8 @@ type Issue struct {
 	UpdatedAt githubv4.DateTime
 	ClosedAt  *githubv4.DateTime
 	Author    Actor
-	// Use proper approach to detect if an issue is a pull request
-	PullRequest struct {
-		URL githubv4.String
-	} `graphql:"pullRequest { url }"`
+	// Use a field to detect if issue is pull request
+	IsPullRequest githubv4.Boolean
 	Comments struct {
 		Nodes []Comment
 		PageInfo struct {
@@ -243,12 +241,8 @@ func (c *GraphQLClient) fetchIssuesBatch(
 
 		// First get or create the user for this issue
 		var userID int64
-		if issue.Author.DatabaseID != nil {
-			userID = int64(*issue.Author.DatabaseID)
-		} else {
-			// Generate a pseudo-ID based on login if actual ID is not available
-			userID = generatePseudoID(string(issue.Author.Login))
-		}
+		// DatabaseID is now an int value, not a pointer
+		userID = int64(issue.Author.DatabaseID)
 
 		// Convert issue
 		modelIssue := &models.Issue{
@@ -261,7 +255,7 @@ func (c *GraphQLClient) fetchIssuesBatch(
 			UpdatedAt:     convertDateTime(issue.UpdatedAt),
 			ClosedAt:      convertNullableDateTime(issue.ClosedAt),
 			UserID:        userID,
-			IsPullRequest: string(issue.PullRequest.URL) != "",
+			IsPullRequest: bool(issue.IsPullRequest),
 		}
 
 		// Convert comments
@@ -270,12 +264,8 @@ func (c *GraphQLClient) fetchIssuesBatch(
 		
 		for _, comment := range issue.Comments.Nodes {
 			var commentUserID int64
-			if comment.Author.DatabaseID != nil {
-				commentUserID = int64(*comment.Author.DatabaseID)
-			} else {
-				// Generate a pseudo-ID based on login if actual ID is not available
-				commentUserID = generatePseudoID(string(comment.Author.Login))
-			}
+			// DatabaseID is now an int value, not a pointer
+			commentUserID = int64(comment.Author.DatabaseID)
 
 			commentUser := &models.User{
 				ID:        commentUserID,
@@ -378,12 +368,8 @@ func (c *GraphQLClient) fetchAdditionalComments(
 		// Convert and append comments
 		for _, comment := range query.Repository.Issue.Comments.Nodes {
 			var commentUserID int64
-			if comment.Author.DatabaseID != nil {
-				commentUserID = int64(*comment.Author.DatabaseID)
-			} else {
-				// Generate a pseudo-ID based on login if actual ID is not available
-				commentUserID = generatePseudoID(string(comment.Author.Login))
-			}
+			// DatabaseID is now an int value, not a pointer
+			commentUserID = int64(comment.Author.DatabaseID)
 
 			commentUser := &models.User{
 				ID:        commentUserID,
