@@ -41,7 +41,8 @@ type Repository struct {
 type Actor struct {
 	Login     githubv4.String
 	AvatarURL githubv4.String
-	ID        githubv4.ID
+	// Use fragments to access different implementations of Actor
+	DatabaseID *githubv4.Int `graphql:"... on User { databaseId }"`
 }
 
 // Issue represents a GitHub issue in GraphQL
@@ -242,8 +243,14 @@ func (c *GraphQLClient) fetchIssuesBatch(
 		}
 
 		// First get or create the user for this issue
-		userID := convertID(issue.Author.ID)
-		
+		var userID int64
+		if issue.Author.DatabaseID != nil {
+			userID = int64(*issue.Author.DatabaseID)
+		} else {
+			// Generate a pseudo-ID based on login if actual ID is not available
+			userID = generatePseudoID(string(issue.Author.Login))
+		}
+
 		// Convert issue
 		modelIssue := &models.Issue{
 			ID:            convertID(issue.ID),
@@ -263,7 +270,14 @@ func (c *GraphQLClient) fetchIssuesBatch(
 		var usersToSave []*models.User
 		
 		for _, comment := range issue.Comments.Nodes {
-			commentUserID := convertID(comment.Author.ID)
+			var commentUserID int64
+			if comment.Author.DatabaseID != nil {
+				commentUserID = int64(*comment.Author.DatabaseID)
+			} else {
+				// Generate a pseudo-ID based on login if actual ID is not available
+				commentUserID = generatePseudoID(string(comment.Author.Login))
+			}
+
 			commentUser := &models.User{
 				ID:        commentUserID,
 				Login:     string(comment.Author.Login),
@@ -364,7 +378,14 @@ func (c *GraphQLClient) fetchAdditionalComments(
 
 		// Convert and append comments
 		for _, comment := range query.Repository.Issue.Comments.Nodes {
-			commentUserID := convertID(comment.Author.ID)
+			var commentUserID int64
+			if comment.Author.DatabaseID != nil {
+				commentUserID = int64(*comment.Author.DatabaseID)
+			} else {
+				// Generate a pseudo-ID based on login if actual ID is not available
+				commentUserID = generatePseudoID(string(comment.Author.Login))
+			}
+
 			commentUser := &models.User{
 				ID:        commentUserID,
 				Login:     string(comment.Author.Login),
@@ -391,4 +412,14 @@ func (c *GraphQLClient) fetchAdditionalComments(
 	}
 
 	return allComments, allUsers, nil
+}
+
+// generatePseudoID creates a numeric ID from a string
+func generatePseudoID(s string) int64 {
+	// Simple hash function to generate a pseudo-ID
+	var hash int64 = 0
+	for _, c := range s {
+		hash = hash*31 + int64(c)
+	}
+	return hash
 }
