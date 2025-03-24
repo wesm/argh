@@ -41,8 +41,28 @@ type Repository struct {
 type Actor struct {
 	Login     githubv4.String
 	AvatarURL githubv4.String
-	// Use a proper field to access databaseId
-	DatabaseID githubv4.Int `graphql:"databaseId"`
+	// Use inline fragments to access databaseId from different user types
+	// We need to define fragments for all possible types that implement Actor interface
+	UserDatabaseID  githubv4.Int `graphql:"... on User { databaseId }"`
+	BotDatabaseID   githubv4.Int `graphql:"... on Bot { databaseId }"`
+	MannequinDatabaseID githubv4.Int `graphql:"... on Mannequin { databaseId }"`
+}
+
+// getDatabaseID safely extracts the database ID from an Actor
+func getDatabaseID(actor Actor) int64 {
+	// Try different actor types
+	if actor.UserDatabaseID > 0 {
+		return int64(actor.UserDatabaseID)
+	}
+	if actor.BotDatabaseID > 0 {
+		return int64(actor.BotDatabaseID)
+	}
+	if actor.MannequinDatabaseID > 0 {
+		return int64(actor.MannequinDatabaseID)
+	}
+	
+	// Fallback to hash of login if no ID found
+	return generatePseudoID(string(actor.Login))
 }
 
 // Issue represents a GitHub issue in GraphQL
@@ -241,8 +261,7 @@ func (c *GraphQLClient) fetchIssuesBatch(
 
 		// First get or create the user for this issue
 		var userID int64
-		// DatabaseID is now an int value, not a pointer
-		userID = int64(issue.Author.DatabaseID)
+		userID = getDatabaseID(issue.Author)
 
 		// Convert issue
 		modelIssue := &models.Issue{
@@ -264,8 +283,7 @@ func (c *GraphQLClient) fetchIssuesBatch(
 		
 		for _, comment := range issue.Comments.Nodes {
 			var commentUserID int64
-			// DatabaseID is now an int value, not a pointer
-			commentUserID = int64(comment.Author.DatabaseID)
+			commentUserID = getDatabaseID(comment.Author)
 
 			commentUser := &models.User{
 				ID:        commentUserID,
@@ -368,8 +386,7 @@ func (c *GraphQLClient) fetchAdditionalComments(
 		// Convert and append comments
 		for _, comment := range query.Repository.Issue.Comments.Nodes {
 			var commentUserID int64
-			// DatabaseID is now an int value, not a pointer
-			commentUserID = int64(comment.Author.DatabaseID)
+			commentUserID = getDatabaseID(comment.Author)
 
 			commentUser := &models.User{
 				ID:        commentUserID,
