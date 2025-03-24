@@ -5,34 +5,45 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"github.com/wesm/github-issue-digest/config"
-	"github.com/wesm/github-issue-digest/internal/api"
 	"github.com/wesm/github-issue-digest/internal/db"
 	"github.com/wesm/github-issue-digest/internal/sync"
 )
 
 func main() {
 	// Define command-line flags
-	configPath := flag.String("config", "config.json", "Path to configuration file")
-	createConfig := flag.Bool("init", false, "Create a default configuration file if it doesn't exist")
-	addRepo := flag.String("add-repo", "", "Add a repository to the configuration (format: owner/name)")
-	syncAll := flag.Bool("sync-all", false, "Sync all repositories in the configuration")
-	syncRepo := flag.String("sync-repo", "", "Sync a specific repository (format: owner/name)")
+	var (
+		configPath      string
+		createConfig    bool
+		addRepo         string
+		syncAll         bool
+		syncRepo        string
+		workers         int
+		useGraphQL      bool
+	)
+	flag.StringVar(&configPath, "config", "config.json", "Path to configuration file")
+	flag.BoolVar(&createConfig, "init", false, "Create a default configuration file if it doesn't exist")
+	flag.StringVar(&addRepo, "add-repo", "", "Add a repository to the configuration (format: owner/name)")
+	flag.BoolVar(&syncAll, "sync-all", false, "Sync all repositories in the configuration")
+	flag.StringVar(&syncRepo, "sync-repo", "", "Sync a specific repository (format: owner/name)")
+	flag.IntVar(&workers, "workers", 5, "Number of worker goroutines for syncing repositories")
+	flag.BoolVar(&useGraphQL, "graphql", false, "Use GraphQL API instead of REST API")
 	flag.Parse()
 
 	// Create default configuration if requested
-	if *createConfig {
-		if err := config.CreateDefaultConfig(*configPath); err != nil {
+	if createConfig {
+		if err := config.CreateDefaultConfig(configPath); err != nil {
 			log.Fatalf("Failed to create default configuration: %v", err)
 		}
-		log.Printf("Created default configuration at %s", *configPath)
+		log.Printf("Created default configuration at %s", configPath)
 		return
 	}
 
 	// Check if we need to perform any operations that require the config
-	needConfig := *addRepo != "" || *syncAll || *syncRepo != ""
+	needConfig := addRepo != "" || syncAll || syncRepo != ""
 
 	// Only load configuration if needed
 	var cfg *config.Config
@@ -40,15 +51,15 @@ func main() {
 
 	if needConfig {
 		// Load configuration
-		cfg, err = config.LoadConfig(*configPath)
+		cfg, err = config.LoadConfig(configPath)
 		if err != nil {
 			log.Fatalf("Failed to load configuration: %v", err)
 		}
 	}
 
 	// Add repository if requested
-	if *addRepo != "" {
-		_, _, err := sync.ParseRepositoryString(*addRepo)
+	if addRepo != "" {
+		_, _, err := sync.ParseRepositoryString(addRepo)
 		if err != nil {
 			log.Fatalf("Invalid repository format: %v", err)
 		}
@@ -56,23 +67,23 @@ func main() {
 		// Check if the repository already exists in the configuration
 		exists := false
 		for _, repo := range cfg.Repositories {
-			if repo == *addRepo {
+			if repo == addRepo {
 				exists = true
 				break
 			}
 		}
 
 		if !exists {
-			cfg.Repositories = append(cfg.Repositories, *addRepo)
-			if err := config.SaveConfig(cfg, *configPath); err != nil {
+			cfg.Repositories = append(cfg.Repositories, addRepo)
+			if err := config.SaveConfig(cfg, configPath); err != nil {
 				log.Fatalf("Failed to save configuration: %v", err)
 			}
-			log.Printf("Added repository %s to configuration", *addRepo)
+			log.Printf("Added repository %s to configuration", addRepo)
 		} else {
-			log.Printf("Repository %s already exists in configuration", *addRepo)
+			log.Printf("Repository %s already exists in configuration", addRepo)
 		}
 
-		if !*syncAll && *syncRepo == "" {
+		if !syncAll && syncRepo == "" {
 			return
 		}
 	}
@@ -93,6 +104,8 @@ func main() {
 		fmt.Println("  -add-repo <owner/name>  Add a repository to the configuration")
 		fmt.Println("  -sync-all               Sync all repositories in the configuration")
 		fmt.Println("  -sync-repo <owner/name> Sync a specific repository")
+		fmt.Println("  -workers <num>          Number of worker goroutines for syncing repositories (default: 5)")
+		fmt.Println("  -graphql                Use GraphQL API instead of REST API")
 		fmt.Println()
 		fmt.Println("EXAMPLES:")
 		fmt.Println("  ./gird -init                           # Create default config.json")
@@ -122,19 +135,25 @@ func main() {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
 
-	// Initialize GitHub client
-	client := api.NewGitHubClient(cfg.GitHubToken)
+	// Get GitHub token from environment variable or configuration
+	token := os.Getenv("GIRD_GITHUB_TOKEN")
+	if token == "" {
+		token = cfg.GitHubToken
+	}
+	if token == "" {
+		log.Fatalf("GitHub token not found. Please set the GIRD_GITHUB_TOKEN environment variable or add it to the configuration file.")
+	}
 
 	// Initialize syncer
-	syncer := sync.New(database, client)
+	syncer := sync.NewSyncer(database, token, workers, useGraphQL)
 
 	// Sync repositories
 	ctx := context.Background()
 	startTime := time.Now()
 
-	if *syncRepo != "" {
+	if syncRepo != "" {
 		// Sync a specific repository
-		owner, name, err := sync.ParseRepositoryString(*syncRepo)
+		owner, name, err := sync.ParseRepositoryString(syncRepo)
 		if err != nil {
 			log.Fatalf("Invalid repository format: %v", err)
 		}
@@ -143,7 +162,7 @@ func main() {
 		if err := syncer.SyncRepository(ctx, owner, name); err != nil {
 			log.Fatalf("Failed to sync repository %s/%s: %v", owner, name, err)
 		}
-	} else if *syncAll {
+	} else if syncAll {
 		// Sync all repositories
 		log.Printf("Syncing %d repositories", len(cfg.Repositories))
 		for _, repoStr := range cfg.Repositories {
