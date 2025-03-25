@@ -17,6 +17,7 @@ type User struct {
 	ID        int64
 	Login     string
 	AvatarURL string
+	Type      string // "User" or "Organization"
 }
 
 // Issue represents a GitHub issue

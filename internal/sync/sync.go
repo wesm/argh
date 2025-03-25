@@ -48,9 +48,14 @@ func (s *Syncer) SyncRepository(ctx context.Context, owner, name string) error {
 	fullName := fmt.Sprintf("%s/%s", owner, name)
 	
 	// Get the repository information
-	repo, err := s.restClient.GetRepository(ctx, owner, name)
+	repo, ownerUser, err := s.restClient.GetRepository(ctx, owner, name)
 	if err != nil {
 		return fmt.Errorf("failed to get repository %s: %w", fullName, err)
+	}
+
+	// Save the repository owner as a user
+	if err := s.db.SaveUser(ownerUser); err != nil {
+		return fmt.Errorf("failed to save repository owner %s: %w", ownerUser.Login, err)
 	}
 
 	// Save the repository to the database

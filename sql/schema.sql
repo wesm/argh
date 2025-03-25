@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS repositories (
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY,
     login TEXT NOT NULL UNIQUE,
-    avatar_url TEXT
+    avatar_url TEXT,
+    type TEXT DEFAULT 'User'
 );
 
 -- Issues and pull requests

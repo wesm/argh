@@ -41,7 +41,8 @@ func (db *DB) Initialize() error {
 	CREATE TABLE IF NOT EXISTS users (
 		id INTEGER PRIMARY KEY,
 		login TEXT NOT NULL UNIQUE,
-		avatar_url TEXT
+		avatar_url TEXT,
+		type TEXT DEFAULT 'User'
 	);
 
 	CREATE TABLE IF NOT EXISTS issues (
@@ -122,14 +123,15 @@ func (db *DB) SaveRepository(repo *models.Repository) error {
 // SaveUser saves a user to the database
 func (db *DB) SaveUser(user *models.User) error {
 	query := `
-	INSERT INTO users (id, login, avatar_url)
-	VALUES (?, ?, ?)
+	INSERT INTO users (id, login, avatar_url, type)
+	VALUES (?, ?, ?, ?)
 	ON CONFLICT(id) DO UPDATE SET
 		login = excluded.login,
-		avatar_url = excluded.avatar_url
+		avatar_url = excluded.avatar_url,
+		type = excluded.type
 	`
 
-	_, err := db.Exec(query, user.ID, user.Login, user.AvatarURL)
+	_, err := db.Exec(query, user.ID, user.Login, user.AvatarURL, user.Type)
 	if err != nil {
 		return fmt.Errorf("failed to save user: %w", err)
 	}

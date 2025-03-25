@@ -143,7 +143,7 @@ func (c *GitHubClient) executeWithRetry(ctx context.Context, operation string, f
 }
 
 // GetRepository gets a repository by owner and name
-func (c *GitHubClient) GetRepository(ctx context.Context, owner, name string) (*models.Repository, error) {
+func (c *GitHubClient) GetRepository(ctx context.Context, owner, name string) (*models.Repository, *models.User, error) {
 	var repo *github.Repository
 	var err error
 
@@ -155,7 +155,15 @@ func (c *GitHubClient) GetRepository(ctx context.Context, owner, name string) (*
 	})
 
 	if retryErr != nil {
-		return nil, fmt.Errorf("failed to get repository: %w", retryErr)
+		return nil, nil, fmt.Errorf("failed to get repository: %w", retryErr)
+	}
+
+	// Create a User object for the repository owner
+	ownerUser := &models.User{
+		ID:        HandleGitHubID(repo.GetOwner().GetID()),
+		Login:     repo.GetOwner().GetLogin(),
+		AvatarURL: repo.GetOwner().GetAvatarURL(),
+		Type:      repo.GetOwner().GetType(),
 	}
 
 	return &models.Repository{
@@ -163,7 +171,7 @@ func (c *GitHubClient) GetRepository(ctx context.Context, owner, name string) (*
 		Owner:    repo.GetOwner().GetLogin(),
 		Name:     repo.GetName(),
 		FullName: repo.GetFullName(),
-	}, nil
+	}, ownerUser, nil
 }
 
 // GetIssues gets issues for a repository, optionally since a specific time
@@ -275,6 +283,7 @@ func ConvertGitHubUser(user *github.User) *models.User {
 		ID:        HandleGitHubID(user.GetID()),
 		Login:     user.GetLogin(),
 		AvatarURL: user.GetAvatarURL(),
+		Type:      user.GetType(),
 	}
 }
 

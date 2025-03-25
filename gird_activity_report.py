@@ -2,7 +2,37 @@
 
 """
 GitHub Activity Report Generator for GIRD
+
 Generates reports for recent GitHub activity from a GIRD database.
+
+This script analyzes GitHub issue and pull request activity stored in a GIRD SQLite database
+and generates a detailed Markdown report that can be:
+1. Viewed directly as plain text
+2. Sent to an LLM (Anthropic's Claude or OpenAI) for summarization
+
+Features:
+- Filter activity by date range
+- Filter by specific repositories
+- Generate summaries using Claude 3.7 Sonnet (default) or OpenAI models
+- Markdown formatting with proper GitHub links
+
+Usage:
+  python gird_activity_report.py [OPTIONS]
+
+Examples:
+  # Generate a report for the last 7 days and print to console
+  python gird_activity_report.py
+
+  # Generate a report with OpenAI and save to file
+  python gird_activity_report.py --llm-provider openai --output report.md
+
+  # Generate a report for specific repositories for the last 14 days
+  python gird_activity_report.py --days 14 --repositories "owner/repo1,owner/repo2"
+
+Requirements:
+  - A GIRD SQLite database (github_issues.db by default)
+  - chatlas Python package for LLM integration (pip install chatlas)
+  - API key for Anthropic or OpenAI
 """
 
 import os
@@ -38,7 +68,71 @@ if not CHATLAS_AVAILABLE:
 # Constants
 DEFAULT_DB_PATH = "github_issues.db"
 DEFAULT_DAYS = 7
+MAX_LINE_WIDTH = 90  # Maximum width for text wrapping
 
+def wrap_text(text, width=MAX_LINE_WIDTH):
+    """
+    Wrap text to fit within specified width while preserving Markdown formatting.
+    
+    Args:
+        text: Text to wrap
+        width: Maximum width for each line (default: MAX_LINE_WIDTH)
+        
+    Returns:
+        Wrapped text
+    """
+    # Don't wrap if text is None or empty
+    if not text:
+        return text
+        
+    lines = text.split('\n')
+    wrapped_lines = []
+    
+    for line in lines:
+        # Skip wrapping for code blocks, tables, and other special Markdown elements
+        if line.startswith('```') or line.startswith('|') or line.startswith('#') or \
+           line.startswith('- ') or line.startswith('* ') or line.startswith('> ') or \
+           line.strip() == '---' or line.strip() == '':
+            wrapped_lines.append(line)
+            continue
+            
+        # Wrap the line
+        current_width = 0
+        wrapped_line = []
+        words = line.split(' ')
+        
+        for word in words:
+            if current_width + len(word) + 1 > width and current_width > 0:
+                wrapped_lines.append(' '.join(wrapped_line))
+                wrapped_line = [word]
+                current_width = len(word)
+            else:
+                wrapped_line.append(word)
+                current_width += len(word) + 1
+                
+        if wrapped_line:
+            wrapped_lines.append(' '.join(wrapped_line))
+            
+    return '\n'.join(wrapped_lines)
+
+def format_date(date_str):
+    """
+    Format a date string from ISO format to a more readable format.
+    
+    Args:
+        date_str: ISO format date string (e.g. "2023-04-25T15:30:15Z")
+        
+    Returns:
+        Formatted date string (e.g. "Apr 25, 2023")
+    """
+    try:
+        # Parse ISO format date
+        date_obj = datetime.datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+        # Format to a more readable format
+        return date_obj.strftime("%b %d, %Y")
+    except (ValueError, AttributeError):
+        # Return the original string if parsing fails
+        return date_str
 
 class GirdDatabase:
     """Class to interact with the GIRD SQLite database."""
@@ -227,6 +321,7 @@ class GirdDatabase:
             SELECT 
                 users.id as user_id,
                 users.login as user_login,
+                users.type as user_type,
                 SUM(CASE WHEN issues.is_pull_request = 0 THEN 1 ELSE 0 END) as issue_count,
                 SUM(CASE WHEN issues.is_pull_request = 1 THEN 1 ELSE 0 END) as pr_count,
                 0 as comment_count
@@ -242,13 +337,14 @@ class GirdDatabase:
             + repo_filter
             + """
             GROUP BY 
-                users.id, users.login
+                users.id, users.login, users.type
         ),
         -- Contributors from comments
         commenters AS (
             SELECT 
                 users.id as user_id,
                 users.login as user_login,
+                users.type as user_type,
                 0 as issue_count,
                 0 as pr_count,
                 COUNT(*) as comment_count
@@ -266,7 +362,7 @@ class GirdDatabase:
             + repo_filter
             + """
             GROUP BY 
-                users.id, users.login
+                users.id, users.login, users.type
         ),
         -- Combine both contribution types
         all_contributors AS (
@@ -278,14 +374,17 @@ class GirdDatabase:
         SELECT 
             user_id,
             user_login,
+            user_type,
             SUM(issue_count) as issue_count,
             SUM(pr_count) as pr_count,
             SUM(comment_count) as comment_count,
             SUM(issue_count + pr_count + comment_count) as total_activity
         FROM 
             all_contributors
+        WHERE
+            user_type = 'User'
         GROUP BY 
-            user_id, user_login
+            user_id, user_login, user_type
         ORDER BY 
             total_activity DESC
         LIMIT ?
@@ -599,8 +698,6 @@ def chunk_report_for_llm(report, max_chars=20000):
 
 def format_activity_for_report(
     activity,
-    top_contributors=None,
-    hot_issues=None,
     start_date=None,
     end_date=None,
 ):
@@ -609,8 +706,6 @@ def format_activity_for_report(
 
     Args:
         activity: Activity dictionary with issues, prs and comments
-        top_contributors: Optional list of top contributors
-        hot_issues: Optional list of hot issues/PRs
         start_date: Start date of the report period
         end_date: End date of the report period
 
@@ -649,121 +744,63 @@ def format_activity_for_report(
         output.append("- **Repositories:** " + str(len(repos)))
         output.append("  - " + ", ".join(sorted(repos)))
 
-    # Add top contributors section
-    if top_contributors:
-        output.append("\n## Top Contributors")
-        for i, contributor in enumerate(top_contributors, 1):
-            output.append(
-                "**"
-                + str(i)
-                + ". "
-                + contributor["user_login"]
-                + "** - "
-                + str(contributor["total_activity"])
-                + " activities"
-            )
-            contributor_details = []
-            if contributor["issue_count"] > 0:
-                contributor_details.append("Issues: " + str(contributor["issue_count"]))
-            if contributor["pr_count"] > 0:
-                contributor_details.append("PRs: " + str(contributor["pr_count"]))
-            if contributor["comment_count"] > 0:
-                contributor_details.append(
-                    "Comments: " + str(contributor["comment_count"])
-                )
-
-            output.append("   " + ", ".join(contributor_details))
-
-    # Add hot issues/PRs section
-    if hot_issues:
-        output.append("\n## Most Active Discussions")
-        for i, issue in enumerate(hot_issues, 1):
-            issue_type = "PR" if issue.get("is_pull_request", False) else "Issue"
-            repo = issue.get("repository", "unknown/repo")
-            number = issue.get("issue_number", 0)
-            github_link = "https://github.com/" + repo + "/issues/" + str(number)
-
-            output.append(
-                "**"
-                + str(i)
-                + ". ["
-                + issue_type
-                + " #"
-                + str(number)
-                + "]("
-                + github_link
-                + ")** - "
-                + issue.get("issue_title", "Untitled")
-            )
-            output.append("   **Repository:** " + repo)
-            output.append(
-                "   **Activity:** " + str(issue.get("comment_count", 0)) + " comments"
-            )
-            output.append("")
-
     # Format issues with GitHub links
     if issues:
         output.append("\n## New Issues")
         for issue in issues:
             repo = issue.get("repository", "unknown/repo")
-            number = issue.get("number", 0)
-            github_link = "https://github.com/" + repo + "/issues/" + str(number)
-
+            number = issue.get("issue_number", 0)
+            # Create proper Markdown link
+            github_link = f"https://github.com/{repo}/issues/{number}"
+            
             output.append(
-                "### ["
-                + str(number)
-                + " "
-                + issue.get("title", "Untitled")
-                + "]("
-                + github_link
-                + ")"
+                f"### [{repo} #{number}]({github_link}): {issue.get('issue_title', 'Untitled')}"
             )
-            output.append("**Author:** " + issue.get("user_login", "unknown"))
-            output.append("**Repository:** " + repo)
-            output.append("**Created:** " + issue.get("created_at", "unknown date"))
-            output.append("**State:** " + issue.get("state", "unknown"))
-            output.append("\n**Description:**")
-
-            # Truncate very long descriptions
-            description = (
-                issue.get("body", "") if issue.get("body") else "(No description)"
+            output.append("")
+            output.append("**Created by:** " + issue.get("user_login", "unknown"))
+            output.append(
+                "**Created on:** " + format_date(issue.get("created_at", "unknown"))
             )
-            if len(description) > 1000:
-                description = description[:997] + "..."
-
-            output.append(description)
-            output.append("\n" + "-" * 50 + "\n")
+            
+            # Add labels if present
+            if "labels" in issue and issue["labels"]:
+                output.append("**Labels:** " + ", ".join(issue["labels"]))
+            
+            output.append("")
+            if "body" in issue and issue["body"]:
+                # Wrap the issue body text for better readability
+                output.append(wrap_text(issue["body"]))
+            else:
+                output.append("*No description provided*")
+            output.append("\n---\n")
 
     # Format pull requests with GitHub links
     if prs:
         output.append("\n## New Pull Requests")
         for pr in prs:
             repo = pr.get("repository", "unknown/repo")
-            number = pr.get("number", 0)
-            github_link = "https://github.com/" + repo + "/pull/" + str(number)
-
+            number = pr.get("issue_number", 0)
+            # Create proper Markdown link
+            github_link = f"https://github.com/{repo}/pull/{number}"
+            
             output.append(
-                "### ["
-                + str(number)
-                + " "
-                + pr.get("title", "Untitled")
-                + "]("
-                + github_link
-                + ")"
+                f"### [{repo} #{number}]({github_link}): {pr.get('issue_title', 'Untitled')}"
             )
-            output.append("**Author:** " + pr.get("user_login", "unknown"))
-            output.append("**Repository:** " + repo)
-            output.append("**Created:** " + pr.get("created_at", "unknown date"))
-            output.append("**State:** " + pr.get("state", "unknown"))
-            output.append("\n**Description:**")
-
-            # Truncate very long descriptions
-            description = pr.get("body", "") if pr.get("body") else "(No description)"
-            if len(description) > 1000:
-                description = description[:997] + "..."
-
-            output.append(description)
-            output.append("\n" + "-" * 50 + "\n")
+            output.append("")
+            output.append("**Created by:** " + pr.get("user_login", "unknown"))
+            output.append("**Created on:** " + format_date(pr.get("created_at", "unknown")))
+            
+            # Add labels if present
+            if "labels" in pr and pr["labels"]:
+                output.append("**Labels:** " + ", ".join(pr["labels"]))
+            
+            output.append("")
+            if "body" in pr and pr["body"]:
+                # Wrap the PR body text for better readability
+                output.append(wrap_text(pr["body"]))
+            else:
+                output.append("*No description provided*")
+            output.append("\n---\n")
 
     # Format comments with links to parent issues/PRs
     if comments:
@@ -795,8 +832,11 @@ def format_activity_for_report(
             if len(comment_text) > 500:
                 comment_text = comment_text[:497] + "..."
 
-            output.append("\n**Comment:**")
-            output.append(comment_text)
+            # Format the comment body with wrapping
+            if "body" in comment and comment["body"]:
+                output.append(wrap_text(comment["body"]))
+            else:
+                output.append("*No comment text provided*")
             output.append("\n" + "-" * 50 + "\n")
 
     # Add a references section with all links in one place
@@ -804,13 +844,13 @@ def format_activity_for_report(
     output.append("### Issues")
     for issue in issues:
         repo = issue.get("repository", "unknown/repo")
-        number = issue.get("number", 0)
+        number = issue.get("issue_number", 0)
         github_link = "https://github.com/" + repo + "/issues/" + str(number)
         output.append(
             "- ["
             + str(number)
             + " "
-            + issue.get("title", "Untitled")
+            + issue.get("issue_title", "Untitled")
             + "]("
             + github_link
             + ")"
@@ -819,13 +859,13 @@ def format_activity_for_report(
     output.append("\n### Pull Requests")
     for pr in prs:
         repo = pr.get("repository", "unknown/repo")
-        number = pr.get("number", 0)
+        number = pr.get("issue_number", 0)
         github_link = "https://github.com/" + repo + "/pull/" + str(number)
         output.append(
             "- ["
             + str(number)
             + " "
-            + pr.get("title", "Untitled")
+            + pr.get("issue_title", "Untitled")
             + "]("
             + github_link
             + ")"
@@ -1185,454 +1225,117 @@ def cli():
 
 @cli.command()
 @click.option(
-    "--db",
+    "--db-path",
     default=DEFAULT_DB_PATH,
-    help="Path to the GIRD SQLite database (default: " + DEFAULT_DB_PATH + ")",
+    help=f"Path to GIRD SQLite database (default: {DEFAULT_DB_PATH})",
 )
 @click.option(
-    "--list-repos", is_flag=True, help="List all repositories in the database"
-)
-def list_repositories(db, list_repos):
-    """List all repositories in the GIRD database."""
-    with GirdDatabase(db) as gird_db:
-        repos = gird_db.get_repository_names()
-        click.echo("Repositories in database:")
-        for repo in repos:
-            click.echo("  - " + repo)
-
-
-@cli.command()
-@click.option(
-    "--db",
-    default=DEFAULT_DB_PATH,
-    help="Path to the GIRD SQLite database (default: " + DEFAULT_DB_PATH + ")",
+    "--output",
+    default=None,
+    help="Path to save the report (default: print to stdout)",
 )
 @click.option(
     "--days",
-    default=DEFAULT_DAYS,
-    type=int,
-    help="Number of days to look back (default: " + str(DEFAULT_DAYS) + ")",
-)
-@click.option("--start-date", help="Start date (YYYY-MM-DD)")
-@click.option("--end-date", help="End date (YYYY-MM-DD)")
-@click.option(
-    "--repos",
-    multiple=True,
-    help="Specific repositories to filter by (owner/name format). Can be used multiple times.",
-)
-@click.option("--output", help="Output file for the report (default: stdout)")
-@click.option(
-    "--top-contributors",
-    default=10,
-    type=int,
-    help="Number of top contributors to include (default: 10, 0 to disable)",
+    default=7,
+    help="Number of days to include in the report (default: 7)",
 )
 @click.option(
-    "--hot-issues",
-    default=5,
-    type=int,
-    help="Number of most active issues to include (default: 5, 0 to disable)",
+    "--repositories",
+    default=None,
+    help="Comma-separated list of repositories to include (default: all)",
 )
 @click.option(
-    "--chunk-size",
-    default=20000,
-    type=int,
-    help="Maximum characters per chunk for large reports (default: 20000)",
+    "--llm-api-key",
+    default=None,
+    help="API key for the LLM (default: LLM_API_KEY environment variable)",
 )
-@click.option(
-    "--time-chunks",
-    type=int,
-    help="Split report into time chunks of specified days (optional)",
-)
-@click.option("--llm", is_flag=True, help="Send the report to an LLM for summarization")
-@click.option("--llm-key", help="LLM API key")
 @click.option(
     "--llm-model",
     default="claude-3-7-sonnet-latest",
-    help="Model name to use (default: claude-3-7-sonnet-latest)",
+    help="Model name for the LLM (default: claude-3-7-sonnet-latest)",
 )
 @click.option(
     "--llm-provider",
     default="anthropic",
-    help="LLM provider to use (default: anthropic, can also be openai)",
+    type=click.Choice(["anthropic", "openai"]),
+    help="LLM provider to use (default: anthropic)",
 )
-@click.option("--llm-prompt", help="Custom prompt for the LLM")
 @click.option(
     "--dry-run",
     is_flag=True,
-    help="Show prompts that would be sent to the LLM without making API calls",
+    help="Don't actually send to LLM, just show what would be sent",
 )
 @click.option(
-    "--verbose",
-    is_flag=True,
-    help="Display full report content in addition to LLM summary",
+    "--custom-prompt",
+    default=None,
+    help="Custom prompt to use for the LLM (overrides the default)",
 )
-@click.option(
-    "--no-llm",
-    is_flag=True,
-    help="Skip LLM summarization and only generate raw activity data",
-)
-def generate_report(
-    db,
-    days,
-    start_date,
-    end_date,
-    repos,
+def cli(
+    db_path,
     output,
-    top_contributors,
-    hot_issues,
-    chunk_size,
-    time_chunks,
-    llm,
-    llm_key,
+    days,
+    repositories,
+    llm_api_key,
     llm_model,
     llm_provider,
-    llm_prompt,
     dry_run,
-    verbose,
-    no_llm,
+    custom_prompt,
 ):
-    """Generate a GitHub activity report from the GIRD database."""
-    # Determine if we should use the LLM
-    use_llm = (llm or not no_llm) and not dry_run
-    show_llm_preview = dry_run
-
-    # Check for API key if we need one
-    if (use_llm or show_llm_preview) and not llm_key:
-        llm_key = os.environ.get("LLM_API_KEY")
-        if not llm_key and not show_llm_preview:
-            click.echo(
-                "Error: LLM API key not provided. Use --llm-key or set LLM_API_KEY environment variable.\n"
-                "To run without LLM summarization, use --no-llm.\n"
-                "To preview LLM prompts without an API key, use --dry-run.",
-                err=True,
+    """Generate a report of GitHub activity from a GIRD database."""
+    # Get API key from environment if not provided
+    if llm_api_key is None:
+        llm_api_key = os.environ.get("LLM_API_KEY")
+        if llm_api_key is None and not dry_run:
+            raise ValueError(
+                "LLM API key must be provided via --llm-api-key or LLM_API_KEY environment variable"
             )
-            return
-
-    # If dry-run is enabled, a dummy key is fine
-    if show_llm_preview and not llm_key:
-        llm_key = "dry-run-mode-no-key-needed"
-
+    
+    # Check provider availability
+    if not dry_run:
+        if llm_provider == "anthropic" and not ANTHROPIC_AVAILABLE:
+            raise ImportError("ChatAnthropic is not available. Please install with: pip install chatlas")
+        elif llm_provider == "openai" and not OPENAI_AVAILABLE:
+            raise ImportError("ChatOpenAI is not available. Please install with: pip install chatlas")
+    
     # Open database connection
-    with GirdDatabase(db) as gird_db:
+    with GirdDatabase(db_path) as gird_db:
         # Determine date range
         end_date_obj = datetime.datetime.now()
-        if end_date:
-            end_date_obj = datetime.datetime.strptime(end_date, "%Y-%m-%d")
-
         start_date_obj = end_date_obj - datetime.timedelta(days=days)
-        if start_date:
-            start_date_obj = datetime.datetime.strptime(start_date, "%Y-%m-%d")
 
         # Get activity data
         activity = gird_db.get_recent_activity(
-            start_date_obj, end_date_obj, list(repos) if repos else None
+            start_date_obj, end_date_obj, repositories.split(",") if repositories else None
         )
 
-        # Check if we should use time-based chunking
-        if time_chunks and time_chunks > 0:
-            # Split activity by time chunks
-            time_chunks_data = gird_db.chunk_activity_by_time(activity, time_chunks)
+        # Format for output
+        report = format_activity_for_report(activity, start_date=start_date_obj, end_date=end_date_obj)
 
-            if not time_chunks_data:
-                click.echo("No activity found in the specified time range.")
-                return
+        # Wrap report text to fit within MAX_LINE_WIDTH
+        wrapped_report = wrap_text(report)
 
-            # Process each time chunk
-            for i, chunk in enumerate(time_chunks_data, 1):
-                chunk_start = chunk["start_date"]
-                chunk_end = chunk["end_date"]
-                chunk_data = chunk["data"]
-
-                click.echo("\n" + "=" * 80)
-                click.echo(
-                    "Processing time chunk "
-                    + str(i)
-                    + "/"
-                    + str(len(time_chunks_data))
-                    + ": "
-                    + chunk_start.strftime("%Y-%m-%d")
-                    + " to "
-                    + chunk_end.strftime("%Y-%m-%d")
-                )
-                click.echo("=" * 80)
-
-                # Get top contributors and hot issues for this chunk if requested
-                top_contributors_data = None
-                if top_contributors > 0:
-                    top_contributors_data = gird_db.get_top_contributors(
-                        chunk_start,
-                        chunk_end,
-                        list(repos) if repos else None,
-                        top_contributors,
-                    )
-
-                hot_issues_data = None
-                if hot_issues > 0:
-                    hot_issues_data = gird_db.get_hot_issues(
-                        chunk_start,
-                        chunk_end,
-                        list(repos) if repos else None,
-                        hot_issues,
-                    )
-
-                # Format for output
-                chunk_report = format_activity_for_report(
-                    chunk_data,
-                    top_contributors_data,
-                    hot_issues_data,
-                    chunk_start,
-                    chunk_end,
-                )
-
-                # Output filename with chunk info
-                if output:
-                    base_name, ext = os.path.splitext(output)
-                    chunk_filename = base_name + "_chunk" + str(i) + ext
-                    with open(chunk_filename, "w") as f:
-                        f.write(chunk_report)
-                    click.echo(
-                        "Chunk " + str(i) + " report written to " + chunk_filename
-                    )
-                else:
-                    # Only print report content if verbose mode is enabled
-                    if verbose or dry_run:
-                        click.echo(chunk_report)
-                    else:
-                        click.echo(
-                            "Report chunk "
-                            + str(i)
-                            + " generated. Use --verbose to see the content."
-                        )
-
-                # Send to LLM if requested
-                if use_llm or show_llm_preview:
-                    # Send to LLM and print response
-                    click.echo(
-                        "\nSending chunk "
-                        + str(i)
-                        + " to "
-                        + llm_model
-                        + " for analysis..."
-                        + (" (DRY RUN)" if show_llm_preview else "")
-                    )
-                    llm_response = send_to_llm(
-                        chunk_report,
-                        llm_key,
-                        llm_model,
-                        llm_prompt,
-                        show_llm_preview,
-                        provider=llm_provider,
-                    )
-                    click.echo(
-                        "\n--- " + llm_model + " Summary for Chunk " + str(i) + " ---\n"
-                    )
-                    click.echo(llm_response)
-                elif no_llm:
-                    click.echo("\nSkipping LLM summarization (--no-llm flag set).")
-                else:
-                    click.echo(
-                        "\nReport generated. Use --llm to send to LLM for summarization."
-                    )
+        # Output the report
+        if output:
+            with open(output, "w") as f:
+                f.write(wrapped_report)
+            print(f"Report written to {output}")
         else:
-            # Process the entire date range as a single report
+            print(wrapped_report)
 
-            # Get top contributors and hot issues if requested
-            top_contributors_data = None
-            if top_contributors > 0:
-                top_contributors_data = gird_db.get_top_contributors(
-                    start_date_obj,
-                    end_date_obj,
-                    list(repos) if repos else None,
-                    top_contributors,
-                )
-
-            hot_issues_data = None
-            if hot_issues > 0:
-                hot_issues_data = gird_db.get_hot_issues(
-                    start_date_obj,
-                    end_date_obj,
-                    list(repos) if repos else None,
-                    hot_issues,
-                )
-
-            # Format for output
-            formatted_report = format_activity_for_report(
-                activity,
-                top_contributors_data,
-                hot_issues_data,
-                start_date_obj,
-                end_date_obj,
+        # Send to LLM if requested
+        if llm_api_key and not dry_run:
+            # Send to LLM and print response
+            print(f"\nSending report to {llm_model} for analysis...")
+            llm_response = send_to_llm(
+                wrapped_report,
+                llm_api_key,
+                llm_model,
+                custom_prompt,
+                dry_run,
+                provider=llm_provider,
             )
-
-            # Output the report
-            if output:
-                with open(output, "w") as f:
-                    f.write(formatted_report)
-                click.echo("Report written to " + output)
-            else:
-                # Only print report content if verbose mode is enabled
-                if verbose or dry_run:
-                    click.echo(formatted_report)
-                else:
-                    num_issues = len(activity.get("issues", []))
-                    num_prs = len(activity.get("pull_requests", []))
-                    num_comments = len(activity.get("comments", []))
-                    click.echo(
-                        "Report generated with "
-                        + str(num_issues)
-                        + " issues, "
-                        + str(num_prs)
-                        + " PRs, and "
-                        + str(num_comments)
-                        + " comments."
-                    )
-                    click.echo("Use --verbose to see the full report content.")
-
-            # Send to LLM if requested
-            if use_llm or show_llm_preview:
-                # Use the chunking mechanism for LLM if the report is large
-                click.echo(
-                    "\nSending report to "
-                    + llm_model
-                    + " for analysis..."
-                    + (" (DRY RUN)" if show_llm_preview else "")
-                )
-
-                # Add the actual count information to the report before sending to the LLM
-                num_issues = len(activity.get("issues", []))
-                num_prs = len(activity.get("pull_requests", []))
-                num_comments = len(activity.get("comments", []))
-
-                # Add counts at the beginning and end of the report
-                formatted_report_with_counts = f"""# IMPORTANT COUNT DATA - REFER TO THESE EXACT NUMBERS IN YOUR REPORT
-- Total issues: {num_issues}
-- Total PRs: {num_prs}
-- Total comments: {num_comments}
-
-{formatted_report}
-
-# IMPORTANT COUNT DATA (VERIFICATION)
-- Total issues: {num_issues}
-- Total PRs: {num_prs}
-- Total comments: {num_comments}
-"""
-
-                # Update the LLM prompt to include the actual count values
-                if llm_prompt:
-                    prompt = llm_prompt.format(
-                        num_issues=num_issues,
-                        num_prs=num_prs,
-                        num_comments=num_comments,
-                    )
-                else:
-                    prompt = """
-                    This is a GitHub activity report with recent issues, pull requests, and comments.
-                    
-                    Please provide a concise summary with the following sections.
-                    
-                    ## Executive Summary
-                    A comprehensive overview of the overall activity and the most significant developments.
-                    Include the following:
-                    - The overall state of the project and its momentum
-                    - Major themes or patterns across the reported activity
-                    - Implications of these developments for users and developers
-                    - Notable shifts in project direction or focus
-                    
-                    ## Key Metrics
-                    - Total issues: {num_issues}
-                    - Total PRs: {num_prs}
-                    - Total comments: {num_comments}
-                    - List all repositories mentioned in the report
-                    
-                    **Contributors:**
-                    Create a complete table showing ALL active contributors including bots and automated services.
-                    The table MUST include:
-                    | Contributor | PRs Created | Issues Created | Comments Made | Total Activity |
-                    
-                    Add a "TOTAL" row at the bottom that sums each column.
-                    
-                    IMPORTANT: The "TOTAL" row should match the actual database counts exactly:
-                    - The sum of the "PRs Created" column MUST EQUAL {num_prs}
-                    - The sum of the "Issues Created" column MUST EQUAL {num_issues}
-                    - The sum of the "Comments Made" column MUST EQUAL {num_comments}
-                    - The "Total Activity" column should equal the sum of the other columns for each contributor
-                    
-                    CRITICAL: Double-check that the "Comments Made" TOTAL equals EXACTLY {num_comments}, which is the correct count from the database.
-                    
-                    ## Development Focus Areas
-                    Identify 3-5 main areas of development based on the data, such as:
-                    - New features being developed
-                    - Major bug fixes or issues being addressed
-                    - Infrastructure or technical improvements
-                    - Documentation or community initiatives
-                    
-                    For each focus area:
-                    - Explain why this work matters to the project
-                    - Describe the potential impact on users and developers
-                    - Note any dependencies or connections between focus areas
-                    - Identify any patterns or trends in this development area
-                    
-                    ## Highlights
-                    Detailed descriptions of the most important issues and PRs, organized by focus area.
-                    
-                    For each highlight:
-                    - Use proper Markdown syntax to create links to GitHub issues/PRs like this: [#1234](https://github.com/owner/repo/issues/1234)
-                    - Explain what problem it solves and why it matters
-                    - Describe the technical approach being taken
-                    - Discuss its significance to the project's roadmap
-                    - Mention any broader implications or dependencies
-                    - Note any related discussions or decisions
-                    
-                    IMPORTANT: Always use full Markdown links for any issues or PRs mentioned.
-                    
-                    ## Action Items
-                    Suggest 3-5 areas that may need attention based on the activity.
-                    For each action item:
-                    - Explain why each needs attention
-                    - Describe the potential impact if addressed or not addressed
-                    - Note any dependencies or prerequisites
-                    - Suggest possible approaches or next steps
-                    """.format(
-                        num_issues=num_issues,
-                        num_prs=num_prs,
-                        num_comments=num_comments,
-                    )
-
-                llm_response = send_to_llm(
-                    formatted_report_with_counts,
-                    llm_key,
-                    llm_model,
-                    prompt,
-                    show_llm_preview,
-                    provider=llm_provider,
-                )
-
-                # Verify if the counts are included in the response
-                if not show_llm_preview:
-                    counts_included = (
-                        f"Total issues: {num_issues}" in llm_response
-                        and f"Total PRs: {num_prs}" in llm_response
-                        and f"Total comments: {num_comments}" in llm_response
-                    )
-
-                    if not counts_included:
-                        llm_response = f"""WARNING: The summary below may contain incorrect statistics.
-The actual counts from the database are:
-- Total issues: {num_issues}
-- Total PRs: {num_prs}
-- Total comments: {num_comments}
-
-{llm_response}"""
-
-                click.echo("\n--- " + llm_model + " Summary ---\n")
-                click.echo(llm_response)
-            elif no_llm:
-                click.echo("\nSkipping LLM summarization (--no-llm flag set).")
-            else:
-                click.echo(
-                    "\nReport generated. Use --llm to send to LLM for summarization."
-                )
+            print(f"\n--- {llm_model} Summary ---\n")
+            print(llm_response)
 
 
 if __name__ == "__main__":
