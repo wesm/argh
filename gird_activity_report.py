@@ -987,9 +987,8 @@ def send_to_llm(
             )
 
             # Default prompt for chunked reports - updated to request structured data
-            prompt = """
-            This is chunk """
-            + str(i + 1) + "/" + str(len(report_chunks)) + """ from a GitHub activity report.
+            prompt = f"""
+            This is chunk {i + 1}/{len(report_chunks)} from a GitHub activity report.
             
             Please analyze this chunk and provide a structured summary with the following sections.
             IMPORTANT: Use EXACTLY these section headers and formats to ensure statistics can be properly aggregated:
