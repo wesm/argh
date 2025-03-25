@@ -61,16 +61,24 @@ class GirdDatabase:
         repo_params = []
 
         if repos:
-            repo_placeholders = ",".join("?" for _ in repos)
-            repo_filter = "AND repositories.full_name IN (" + repo_placeholders + ")"
-            repo_params = repos
+            # For each repository name in format "owner/name", we'll filter by
+            # comparing with repositories.full_name
+            placeholder_list = []
+            for _ in repos:
+                placeholder_list.append("?")
+
+            if placeholder_list:
+                placeholders = ", ".join(placeholder_list)
+                repo_filter = f" AND repositories.full_name IN ({placeholders})"
+                repo_params = repos
 
         # Format dates for SQLite
         start_date_str = start_date.strftime("%Y-%m-%d %H:%M:%S")
         end_date_str = end_date.strftime("%Y-%m-%d %H:%M:%S")
 
         # Query new issues and PRs
-        issues_query = """
+        issues_query = (
+            """
         SELECT 
             issues.id,
             issues.number,
@@ -91,16 +99,20 @@ class GirdDatabase:
             users ON issues.user_id = users.id
         WHERE 
             issues.created_at >= ? AND issues.created_at <= ?
-            """ + repo_filter + """
+            """
+            + repo_filter
+            + """
         ORDER BY 
             issues.created_at DESC
         """
+        )
 
         cursor.execute(issues_query, [start_date_str, end_date_str] + repo_params)
         all_issues = [dict(row) for row in cursor.fetchall()]
 
         # Query new comments
-        comments_query = """
+        comments_query = (
+            """
         SELECT 
             comments.id,
             comments.body,
@@ -122,10 +134,13 @@ class GirdDatabase:
             users ON comments.user_id = users.id
         WHERE 
             comments.created_at >= ? AND comments.created_at <= ?
-            """ + repo_filter + """
+            """
+            + repo_filter
+            + """
         ORDER BY 
             comments.created_at DESC
         """
+        )
 
         cursor.execute(comments_query, [start_date_str, end_date_str] + repo_params)
         all_comments = [dict(row) for row in cursor.fetchall()]
@@ -183,7 +198,8 @@ class GirdDatabase:
         end_date_str = end_date.strftime("%Y-%m-%d %H:%M:%S")
 
         # SQLite doesn't support FULL OUTER JOIN, so we need to use LEFT JOIN + UNION
-        query = """
+        query = (
+            """
         -- Contributors from issues and PRs
         WITH issue_creators AS (
             SELECT 
@@ -200,7 +216,9 @@ class GirdDatabase:
                 users ON issues.user_id = users.id
             WHERE 
                 issues.created_at >= ? AND issues.created_at <= ?
-                """ + repo_filter + """
+                """
+            + repo_filter
+            + """
             GROUP BY 
                 users.id, users.login
         ),
@@ -222,7 +240,9 @@ class GirdDatabase:
                 users ON comments.user_id = users.id
             WHERE 
                 comments.created_at >= ? AND comments.created_at <= ?
-                """ + repo_filter + """
+                """
+            + repo_filter
+            + """
             GROUP BY 
                 users.id, users.login
         ),
@@ -248,6 +268,7 @@ class GirdDatabase:
             total_activity DESC
         LIMIT ?
         """
+        )
 
         cursor.execute(
             query,
@@ -284,16 +305,24 @@ class GirdDatabase:
         repo_params = []
 
         if repos:
-            repo_placeholders = ",".join("?" for _ in repos)
-            repo_filter = "AND repositories.full_name IN (" + repo_placeholders + ")"
-            repo_params = repos
+            # For each repository name in format "owner/name", we'll filter by
+            # comparing with repositories.full_name column
+            placeholder_list = []
+            for _ in repos:
+                placeholder_list.append("?")
+
+            if placeholder_list:
+                placeholders = ", ".join(placeholder_list)
+                repo_filter = f" AND r.full_name IN ({placeholders})"
+                repo_params = repos
 
         # Format dates for SQLite
         start_date_str = start_date.strftime("%Y-%m-%d")
         end_date_str = end_date.strftime("%Y-%m-%d")
 
         # Query for issues with most comments in the time period
-        query = """
+        query = (
+            """
         SELECT 
             i.id as issue_id,
             i.number as issue_number,
@@ -316,13 +345,16 @@ class GirdDatabase:
             comments c ON i.id = c.issue_id AND c.created_at BETWEEN ? AND ?
         WHERE 
             (i.created_at BETWEEN ? AND ? OR i.updated_at BETWEEN ? AND ?)
-            """ + repo_filter + """
+            """
+            + repo_filter
+            + """
         GROUP BY 
             i.id
         ORDER BY 
             comment_count DESC, i.updated_at DESC
         LIMIT ?
         """
+        )
 
         cursor.execute(
             query,
@@ -352,7 +384,9 @@ class GirdDatabase:
             list: List of dictionaries with start_date, end_date, and data for each chunk
         """
         if not activity or not (
-            activity.get("issues") or activity.get("prs") or activity.get("comments")
+            activity.get("issues")
+            or activity.get("pull_requests")
+            or activity.get("comments")
         ):
             return []
 
@@ -364,7 +398,7 @@ class GirdDatabase:
                 datetime.datetime.strptime(issue["created_at"], "%Y-%m-%dT%H:%M:%SZ")
             )
 
-        for pr in activity.get("prs", []):
+        for pr in activity.get("pull_requests", []):
             all_dates.append(
                 datetime.datetime.strptime(pr["created_at"], "%Y-%m-%dT%H:%M:%SZ")
             )
@@ -396,11 +430,7 @@ class GirdDatabase:
             )
 
             # Filter activity for this chunk
-            chunk_data = {
-                "issues": [],
-                "pull_requests": [],
-                "comments": []
-            }
+            chunk_data = {"issues": [], "pull_requests": [], "comments": []}
 
             for issue in activity.get("issues", []):
                 issue_date = datetime.datetime.strptime(
@@ -409,7 +439,7 @@ class GirdDatabase:
                 if chunk_start <= issue_date <= chunk_end:
                     chunk_data["issues"].append(issue)
 
-            for pr in activity.get("prs", []):
+            for pr in activity.get("pull_requests", []):
                 pr_date = datetime.datetime.strptime(
                     pr["created_at"], "%Y-%m-%dT%H:%M:%SZ"
                 )
@@ -424,7 +454,11 @@ class GirdDatabase:
                     chunk_data["comments"].append(comment)
 
             # Only add chunk if it has any activity
-            if chunk_data["issues"] or chunk_data["pull_requests"] or chunk_data["comments"]:
+            if (
+                chunk_data["issues"]
+                or chunk_data["pull_requests"]
+                or chunk_data["comments"]
+            ):
                 chunks.append(
                     {
                         "start_date": chunk_start,
@@ -570,7 +604,10 @@ def format_activity_for_report(
     # Add report header with date range
     if start_date and end_date:
         output.append(
-            "# GitHub Activity Report: " + start_date.strftime("%Y-%m-%d") + " to " + end_date.strftime("%Y-%m-%d")
+            "# GitHub Activity Report: "
+            + start_date.strftime("%Y-%m-%d")
+            + " to "
+            + end_date.strftime("%Y-%m-%d")
         )
     else:
         output.append("# GitHub Activity Report")
@@ -595,15 +632,23 @@ def format_activity_for_report(
         output.append("\n## Top Contributors")
         for i, contributor in enumerate(top_contributors, 1):
             output.append(
-                "**" + str(i) + ". " + contributor['user_login'] + "** - " + str(contributor['total_activity']) + " activities"
+                "**"
+                + str(i)
+                + ". "
+                + contributor["user_login"]
+                + "** - "
+                + str(contributor["total_activity"])
+                + " activities"
             )
             contributor_details = []
             if contributor["issue_count"] > 0:
-                contributor_details.append("Issues: " + str(contributor['issue_count']))
+                contributor_details.append("Issues: " + str(contributor["issue_count"]))
             if contributor["pr_count"] > 0:
-                contributor_details.append("PRs: " + str(contributor['pr_count']))
+                contributor_details.append("PRs: " + str(contributor["pr_count"]))
             if contributor["comment_count"] > 0:
-                contributor_details.append("Comments: " + str(contributor['comment_count']))
+                contributor_details.append(
+                    "Comments: " + str(contributor["comment_count"])
+                )
 
             output.append("   " + ", ".join(contributor_details))
 
@@ -617,10 +662,21 @@ def format_activity_for_report(
             github_link = "https://github.com/" + repo + "/issues/" + str(number)
 
             output.append(
-                "**" + str(i) + ". [" + issue_type + " #" + str(number) + "](" + github_link + ")** - " + issue.get('issue_title', 'Untitled')
+                "**"
+                + str(i)
+                + ". ["
+                + issue_type
+                + " #"
+                + str(number)
+                + "]("
+                + github_link
+                + ")** - "
+                + issue.get("issue_title", "Untitled")
             )
             output.append("   **Repository:** " + repo)
-            output.append("   **Activity:** " + str(issue.get('comment_count', 0)) + " comments")
+            output.append(
+                "   **Activity:** " + str(issue.get("comment_count", 0)) + " comments"
+            )
             output.append("")
 
     # Format issues with GitHub links
@@ -632,12 +688,18 @@ def format_activity_for_report(
             github_link = "https://github.com/" + repo + "/issues/" + str(number)
 
             output.append(
-                "### [" + str(number) + " " + issue.get('title', 'Untitled') + "](" + github_link + ")"
+                "### ["
+                + str(number)
+                + " "
+                + issue.get("title", "Untitled")
+                + "]("
+                + github_link
+                + ")"
             )
-            output.append("**Author:** " + issue.get('user_login', 'unknown'))
+            output.append("**Author:** " + issue.get("user_login", "unknown"))
             output.append("**Repository:** " + repo)
-            output.append("**Created:** " + issue.get('created_at', 'unknown date'))
-            output.append("**State:** " + issue.get('state', 'unknown'))
+            output.append("**Created:** " + issue.get("created_at", "unknown date"))
+            output.append("**State:** " + issue.get("state", "unknown"))
             output.append("\n**Description:**")
 
             # Truncate very long descriptions
@@ -659,12 +721,18 @@ def format_activity_for_report(
             github_link = "https://github.com/" + repo + "/pull/" + str(number)
 
             output.append(
-                "### [" + str(number) + " " + pr.get('title', 'Untitled') + "](" + github_link + ")"
+                "### ["
+                + str(number)
+                + " "
+                + pr.get("title", "Untitled")
+                + "]("
+                + github_link
+                + ")"
             )
-            output.append("**Author:** " + pr.get('user_login', 'unknown'))
+            output.append("**Author:** " + pr.get("user_login", "unknown"))
             output.append("**Repository:** " + repo)
-            output.append("**Created:** " + pr.get('created_at', 'unknown date'))
-            output.append("**State:** " + pr.get('state', 'unknown'))
+            output.append("**Created:** " + pr.get("created_at", "unknown date"))
+            output.append("**State:** " + pr.get("state", "unknown"))
             output.append("\n**Description:**")
 
             # Truncate very long descriptions
@@ -685,11 +753,18 @@ def format_activity_for_report(
             github_link = "https://github.com/" + repo + "/issues/" + str(number)
 
             output.append(
-                "### Comment on [" + issue_type + " #" + str(number) + "](" + github_link + ") - " + comment.get('issue_title', 'Untitled')
+                "### Comment on ["
+                + issue_type
+                + " #"
+                + str(number)
+                + "]("
+                + github_link
+                + ") - "
+                + comment.get("issue_title", "Untitled")
             )
-            output.append("**Author:** " + comment.get('user_login', 'unknown'))
+            output.append("**Author:** " + comment.get("user_login", "unknown"))
             output.append("**Repository:** " + repo)
-            output.append("**Created:** " + comment.get('created_at', 'unknown date'))
+            output.append("**Created:** " + comment.get("created_at", "unknown date"))
 
             # Truncate very long comments
             comment_text = (
@@ -709,20 +784,40 @@ def format_activity_for_report(
         repo = issue.get("repository", "unknown/repo")
         number = issue.get("number", 0)
         github_link = "https://github.com/" + repo + "/issues/" + str(number)
-        output.append("- [" + str(number) + " " + issue.get('title', 'Untitled') + "](" + github_link + ")")
+        output.append(
+            "- ["
+            + str(number)
+            + " "
+            + issue.get("title", "Untitled")
+            + "]("
+            + github_link
+            + ")"
+        )
 
     output.append("\n### Pull Requests")
     for pr in prs:
         repo = pr.get("repository", "unknown/repo")
         number = pr.get("number", 0)
         github_link = "https://github.com/" + repo + "/pull/" + str(number)
-        output.append("- [" + str(number) + " " + pr.get('title', 'Untitled') + "](" + github_link + ")")
+        output.append(
+            "- ["
+            + str(number)
+            + " "
+            + pr.get("title", "Untitled")
+            + "]("
+            + github_link
+            + ")"
+        )
 
     return "\n".join(output)
 
 
 def send_to_llm(
-    report_text, api_key, model_name="claude-3-5-sonnet-20240620", custom_prompt=None, dry_run=False
+    report_text,
+    api_key,
+    model_name="claude-3-7-sonnet-20240229",
+    custom_prompt=None,
+    dry_run=False,
 ):
     """
     Send the report to the specified LLM for summarization.
@@ -730,7 +825,7 @@ def send_to_llm(
     Args:
         report_text: The text of the report to summarize
         api_key: API key for the LLM service
-        model_name: The model name to use (default: "claude-3-5-sonnet-20240620")
+        model_name: The model name to use (default: "claude-3-7-sonnet-20240229")
         custom_prompt: Optional custom prompt to use
         dry_run: If True, only print the prompt without making API calls
 
@@ -744,12 +839,12 @@ def send_to_llm(
         # If we have multiple chunks, process each one separately
         all_responses = []
         for i, chunk in enumerate(report_chunks):
-            print("Processing chunk " + str(i + 1) + "/" + str(len(report_chunks)) + "...")
+            print(
+                "Processing chunk " + str(i + 1) + "/" + str(len(report_chunks)) + "..."
+            )
 
             # Default prompt for chunked reports - updated to request structured data
-            prompt = (
-                custom_prompt
-                or """
+            prompt = """
             This is chunk """ + str(i + 1) + "/" + str(len(report_chunks)) + """ from a GitHub activity report.
             
             Please analyze this chunk and provide a structured summary with the following sections.
@@ -766,13 +861,17 @@ def send_to_llm(
             Create a table with EXACTLY these columns:
             | Contributor | PRs Created | Issues Created | Comments Made | Total Activity |
             
-            Include ALL contributors with their exact counts EXCEPT:
-            - NEVER include github-actions[bot] or any account with [bot] in the name
-            - NEVER include dependabot or other automated services
+            Include ALL contributors with their exact counts.
             Use number values only in the table cells, not text descriptions.
             Add a "TOTAL" row at the bottom that sums each column.
             
-            CRITICAL: The sum of activity in this table MUST match the total counts reported above. Double-check your math.
+            IMPORTANT: The "TOTAL" row should match the actual database counts exactly:
+            - The sum of the "PRs Created" column MUST EQUAL {num_prs}
+            - The sum of the "Issues Created" column MUST EQUAL {num_issues}
+            - The sum of the "Comments Made" column MUST EQUAL {num_comments}
+            - The "Total Activity" column should equal the sum of the other columns for each contributor
+            
+            CRITICAL: Double-check that the "Comments Made" TOTAL equals EXACTLY {num_comments}, which is the correct count from the database.
             
             ## KEY_THEMES
             - Main areas of development or focus in this chunk
@@ -787,31 +886,36 @@ def send_to_llm(
             
             CRITICAL: Ensure ALL numerical data is accurate - use exact counts from the data.
             """
-            )
-
             full_prompt = prompt + "\n\n" + chunk
-            
+
             if dry_run:
                 print("\n===== DRY RUN: PROMPT FOR CHUNK " + str(i + 1) + " =====")
                 print("Model: " + model_name)
                 print("Prompt length: " + str(len(full_prompt)) + " characters")
                 print("\n--- Prompt start ---")
-                print(full_prompt[:1000] + "..." if len(full_prompt) > 1000 else full_prompt)
+                print(
+                    full_prompt[:1000] + "..."
+                    if len(full_prompt) > 1000
+                    else full_prompt
+                )
                 print("--- Prompt end ---\n")
-                all_responses.append("[DRY RUN] Chunk " + str(i + 1) + " summary would be generated here.")
+                all_responses.append(
+                    "[DRY RUN] Chunk "
+                    + str(i + 1)
+                    + " summary would be generated here."
+                )
             else:
                 try:
                     # Create a ChatAnthropic instance
-                    chat = ChatAnthropic(
-                        api_key=api_key,
-                        model=model_name
-                    )
-                    
+                    chat = ChatAnthropic(api_key=api_key, model=model_name)
+
                     # Get response
                     response = chat.chat(full_prompt, echo="none")
                     all_responses.append(str(response))
                 except Exception as e:
-                    all_responses.append("Error processing chunk " + str(i + 1) + ": " + str(e))
+                    all_responses.append(
+                        "Error processing chunk " + str(i + 1) + ": " + str(e)
+                    )
 
         # Combine all responses
         combined_response = "\n\n".join(all_responses)
@@ -821,6 +925,11 @@ def send_to_llm(
         You've been given summaries from different chunks of a GitHub activity report. 
         Each chunk contains structured sections including STATS, CONTRIBUTOR_DATA, KEY_THEMES, and DETAILS.
         
+        **MOST IMPORTANT RULE: At the beginning of the input you've been given
+        IMPORTANT COUNT DATA with the EXACT number of issues, PRs, and comments.
+        You MUST use these EXACT numbers in your Key Metrics section. Do not
+        calculate your own totals.**
+        
         Your task is to synthesize these into a SINGLE COHERENT REPORT with the following sections.
         **Format your response using Markdown syntax** to make it compatible with tools like Slack:
         
@@ -829,22 +938,26 @@ def send_to_llm(
         Be specific and detailed about what's happening in the project.
         
         ## Key Metrics
-        IMPORTANT: These metrics must be NUMERICALLY ACCURATE based on the raw data:
-        - Total issues: [SUM of all "Issues in this chunk" counts from the STATS sections]
-        - Total PRs: [SUM of all "PRs in this chunk" counts from the STATS sections]
-        - Total comments: [SUM of all "Comments in this chunk" counts from the STATS sections]
+        CRITICAL: You MUST use the EXACT numbers from the "IMPORTANT COUNT DATA" section at the beginning of this report:
+        - Total issues: [Insert the EXACT number from IMPORTANT COUNT DATA]
+        - Total PRs: [Insert the EXACT number from IMPORTANT COUNT DATA]
+        - Total comments: [Insert the EXACT number from IMPORTANT COUNT DATA]
         - Most active repositories: List the repositories from all chunks with the highest activity
         
         **Contributors:**
-        Create a complete table showing ALL active contributors BUT:
-        - NEVER include github-actions[bot] or any account with [bot] in the name
-        - NEVER include dependabot or other automated services
+        Create a complete table showing ALL active contributors including bots and automated services.
         The table MUST include:
         | Contributor | PRs Created | Issues Created | Comments Made | Total Activity |
         
-        Add a "TOTAL" row at the bottom that sums up all columns.
+        Add a "TOTAL" row at the bottom that sums each column.
         
-        CRITICAL: The sum of activity in this table MUST match the total counts reported above. Double-check your math.
+        IMPORTANT: The "TOTAL" row should match the actual database counts exactly:
+        - The sum of the "PRs Created" column MUST EQUAL {num_prs}
+        - The sum of the "Issues Created" column MUST EQUAL {num_issues}
+        - The sum of the "Comments Made" column MUST EQUAL {num_comments}
+        - The "Total Activity" column should equal the sum of the other columns for each contributor
+        
+        CRITICAL: Double-check that the "Comments Made" TOTAL equals EXACTLY {num_comments}, which is the correct count from the database.
         
         ## Development Focus Areas
         Identify 3-5 main areas of development based on the data, such as:
@@ -875,57 +988,71 @@ def send_to_llm(
         - Exclude any references to bots like github-actions[bot] in your analysis
         - Use rich Markdown formatting including headers, lists, tables, and emphasis for readability
         """
-        
+
         full_final_prompt = final_prompt + "\n\n" + combined_response
-        
+
         if dry_run:
             print("\n===== DRY RUN: FINAL SYNTHESIS PROMPT =====")
             print("Model: " + model_name)
             print("Prompt length: " + str(len(full_final_prompt)) + " characters")
             print("\n--- Prompt start ---")
-            print(full_final_prompt[:1000] + "..." if len(full_final_prompt) > 1000 else full_final_prompt)
+            print(
+                full_final_prompt[:1000] + "..."
+                if len(full_final_prompt) > 1000
+                else full_final_prompt
+            )
             print("--- Prompt end ---\n")
             return "[DRY RUN] This is where the final synthesis would be shown."
         else:
             try:
                 # Create a ChatAnthropic instance
-                chat = ChatAnthropic(
-                    api_key=api_key,
-                    model=model_name
-                )
-                
+                chat = ChatAnthropic(api_key=api_key, model=model_name)
+
                 # Get final synthesis response - return only this, not the individual chunks
                 final_response = chat.chat(full_final_prompt, echo="none")
                 return str(final_response)
             except Exception as e:
-                return "Error creating final synthesis: " + str(e) + "\n\nRaw chunk data (for debugging):\n" + combined_response
+                return (
+                    "Error creating final synthesis: "
+                    + str(e)
+                    + "\n\nRaw chunk data (for debugging):\n"
+                    + combined_response
+                )
     else:
         # For single chunk reports - updated prompt to match the structure of the final report
-        prompt = (
-            custom_prompt
-            or """
-        Please analyze this GitHub activity report and provide a comprehensive summary.
-        **Format your response using Markdown syntax** to make it compatible with tools like Slack:
+        prompt = """
+        This is a GitHub activity report with recent issues, pull requests, and comments.
+        
+        Please provide a concise summary with the following sections.
         
         ## Executive Summary
         A comprehensive overview of the overall activity and the most significant developments.
-        Be specific and detailed about what's happening in the project.
+        Include the following:
+        - The overall state of the project and its momentum
+        - Major themes or patterns across the reported activity
+        - Implications of these developments for users and developers
+        - Notable shifts in project direction or focus
         
         ## Key Metrics
-        IMPORTANT: These metrics must be NUMERICALLY ACCURATE based on the raw data:
-        - Provide the exact count of issues, PRs, and comments from the report
+        - Total issues: {num_issues}
+        - Total PRs: {num_prs}
+        - Total comments: {num_comments}
         - List all repositories mentioned in the report
         
         **Contributors:**
-        Create a complete table showing ALL active contributors BUT:
-        - NEVER include github-actions[bot] or any account with [bot] in the name
-        - NEVER include dependabot or other automated services
+        Create a complete table showing ALL active contributors including bots and automated services.
         The table MUST include:
         | Contributor | PRs Created | Issues Created | Comments Made | Total Activity |
         
-        Add a "TOTAL" row at the bottom that sums up all columns.
+        Add a "TOTAL" row at the bottom that sums each column.
         
-        CRITICAL: The sum of activity in this table MUST match the total counts reported above. Double-check your math.
+        IMPORTANT: The "TOTAL" row should match the actual database counts exactly:
+        - The sum of the "PRs Created" column MUST EQUAL {num_prs}
+        - The sum of the "Issues Created" column MUST EQUAL {num_issues}
+        - The sum of the "Comments Made" column MUST EQUAL {num_comments}
+        - The "Total Activity" column should equal the sum of the other columns for each contributor
+        
+        CRITICAL: Double-check that the "Comments Made" TOTAL equals EXACTLY {num_comments}, which is the correct count from the database.
         
         ## Development Focus Areas
         Identify 3-5 main areas of development based on the data, such as:
@@ -934,47 +1061,55 @@ def send_to_llm(
         - Infrastructure or technical improvements
         - Documentation or community initiatives
         
-        For each focus area, provide detailed context on why this work matters to the project.
+        For each focus area:
+        - Explain why this work matters to the project
+        - Describe the potential impact on users and developers
+        - Note any dependencies or connections between focus areas
+        - Identify any patterns or trends in this development area
         
         ## Highlights
         Detailed descriptions of the most important issues and PRs, organized by focus area.
-        Include relevant issue/PR numbers for reference.
         
         For each highlight:
-        - Explain what problem it solves
-        - Describe the technical approach
-        - Note its significance to the project
-        - Mention any related discussions or decisions
+        - Use proper Markdown syntax to create links to GitHub issues/PRs like this: [#1234](https://github.com/owner/repo/issues/1234)
+        - Explain what problem it solves and why it matters
+        - Describe the technical approach being taken
+        - Discuss its significance to the project's roadmap
+        - Mention any broader implications or dependencies
+        - Note any related discussions or decisions
+        
+        IMPORTANT: Always use full Markdown links for any issues or PRs mentioned.
         
         ## Action Items
-        Suggest 3-5 areas that may need attention based on the activity, explain why each needs attention,
-        and what the potential impact could be.
-        
-        IMPORTANT:
-        - All numerical data MUST be accurate - report the exact counts from the data
-        - Exclude any references to bots like github-actions[bot] in your analysis
-        - Use rich Markdown formatting including headers, lists, tables, and emphasis for readability
-        """
+        Suggest 3-5 areas that may need attention based on the activity.
+        For each action item:
+        - Explain why each needs attention
+        - Describe the potential impact if addressed or not addressed
+        - Note any dependencies or prerequisites
+        - Suggest possible approaches or next steps
+        """.format(
+            num_issues=len(report_text.get("issues", [])),
+            num_prs=len(report_text.get("pull_requests", [])),
+            num_comments=len(report_text.get("comments", [])),
         )
-        
+
         full_prompt = prompt + "\n\n" + report_text
-        
+
         if dry_run:
             print("\n===== DRY RUN: PROMPT =====")
             print("Model: " + model_name)
             print("Prompt length: " + str(len(full_prompt)) + " characters")
             print("\n--- Prompt start ---")
-            print(full_prompt[:1000] + "..." if len(full_prompt) > 1000 else full_prompt)
+            print(
+                full_prompt[:1000] + "..." if len(full_prompt) > 1000 else full_prompt
+            )
             print("--- Prompt end ---\n")
             return "[DRY RUN] This is where the LLM response would be shown."
         else:
             try:
                 # Create a ChatAnthropic instance
-                chat = ChatAnthropic(
-                    api_key=api_key,
-                    model=model_name
-                )
-                
+                chat = ChatAnthropic(api_key=api_key, model=model_name)
+
                 # Get response
                 response = chat.chat(full_prompt, echo="none")
                 return str(response)
@@ -1053,8 +1188,8 @@ def list_repositories(db, list_repos):
 @click.option("--llm-key", help="LLM API key")
 @click.option(
     "--llm-model",
-    default="claude-3-5-sonnet-20240620",
-    help="Model name to use (default: claude-3-5-sonnet-20240620)",
+    default="claude-3-7-sonnet-20240229",
+    help="Model name to use (default: claude-3-7-sonnet-20240229)",
 )
 @click.option("--llm-prompt", help="Custom prompt for the LLM")
 @click.option(
@@ -1095,7 +1230,7 @@ def generate_report(
     # Determine if we should use the LLM
     use_llm = (llm or not no_llm) and not dry_run
     show_llm_preview = dry_run
-    
+
     # Check for API key if we need one
     if (use_llm or show_llm_preview) and not llm_key:
         llm_key = os.environ.get("LLM_API_KEY")
@@ -1145,7 +1280,14 @@ def generate_report(
 
                 click.echo("\n" + "=" * 80)
                 click.echo(
-                    "Processing time chunk " + str(i) + "/" + str(len(time_chunks_data)) + ": " + chunk_start.strftime("%Y-%m-%d") + " to " + chunk_end.strftime("%Y-%m-%d")
+                    "Processing time chunk "
+                    + str(i)
+                    + "/"
+                    + str(len(time_chunks_data))
+                    + ": "
+                    + chunk_start.strftime("%Y-%m-%d")
+                    + " to "
+                    + chunk_end.strftime("%Y-%m-%d")
                 )
                 click.echo("=" * 80)
 
@@ -1183,27 +1325,44 @@ def generate_report(
                     chunk_filename = base_name + "_chunk" + str(i) + ext
                     with open(chunk_filename, "w") as f:
                         f.write(chunk_report)
-                    click.echo("Chunk " + str(i) + " report written to " + chunk_filename)
+                    click.echo(
+                        "Chunk " + str(i) + " report written to " + chunk_filename
+                    )
                 else:
                     # Only print report content if verbose mode is enabled
                     if verbose or dry_run:
                         click.echo(chunk_report)
                     else:
-                        click.echo("Report chunk " + str(i) + " generated. Use --verbose to see the content.")
+                        click.echo(
+                            "Report chunk "
+                            + str(i)
+                            + " generated. Use --verbose to see the content."
+                        )
 
                 # Send to LLM if requested
                 if use_llm or show_llm_preview:
                     # Send to LLM and print response
-                    click.echo("\nSending chunk " + str(i) + " to " + llm_model + " for analysis..." + (" (DRY RUN)" if show_llm_preview else ""))
+                    click.echo(
+                        "\nSending chunk "
+                        + str(i)
+                        + " to "
+                        + llm_model
+                        + " for analysis..."
+                        + (" (DRY RUN)" if show_llm_preview else "")
+                    )
                     llm_response = send_to_llm(
                         chunk_report, llm_key, llm_model, llm_prompt, show_llm_preview
                     )
-                    click.echo("\n--- " + llm_model + " Summary for Chunk " + str(i) + " ---\n")
+                    click.echo(
+                        "\n--- " + llm_model + " Summary for Chunk " + str(i) + " ---\n"
+                    )
                     click.echo(llm_response)
                 elif no_llm:
                     click.echo("\nSkipping LLM summarization (--no-llm flag set).")
                 else:
-                    click.echo("\nReport generated. Use --llm to send to LLM for summarization.")
+                    click.echo(
+                        "\nReport generated. Use --llm to send to LLM for summarization."
+                    )
         else:
             # Process the entire date range as a single report
 
@@ -1248,22 +1407,160 @@ def generate_report(
                     num_issues = len(activity.get("issues", []))
                     num_prs = len(activity.get("pull_requests", []))
                     num_comments = len(activity.get("comments", []))
-                    click.echo("Report generated with " + str(num_issues) + " issues, " + str(num_prs) + " PRs, and " + str(num_comments) + " comments.")
+                    click.echo(
+                        "Report generated with "
+                        + str(num_issues)
+                        + " issues, "
+                        + str(num_prs)
+                        + " PRs, and "
+                        + str(num_comments)
+                        + " comments."
+                    )
                     click.echo("Use --verbose to see the full report content.")
 
             # Send to LLM if requested
             if use_llm or show_llm_preview:
                 # Use the chunking mechanism for LLM if the report is large
-                click.echo("\nSending report to " + llm_model + " for analysis..." + (" (DRY RUN)" if show_llm_preview else ""))
-                llm_response = send_to_llm(
-                    formatted_report, llm_key, llm_model, llm_prompt, show_llm_preview
+                click.echo(
+                    "\nSending report to "
+                    + llm_model
+                    + " for analysis..."
+                    + (" (DRY RUN)" if show_llm_preview else "")
                 )
+
+                # Add the actual count information to the report before sending to the LLM
+                num_issues = len(activity.get("issues", []))
+                num_prs = len(activity.get("pull_requests", []))
+                num_comments = len(activity.get("comments", []))
+
+                # Add counts at the beginning and end of the report
+                formatted_report_with_counts = f"""# IMPORTANT COUNT DATA - REFER TO THESE EXACT NUMBERS IN YOUR REPORT
+- Total issues: {num_issues}
+- Total PRs: {num_prs}
+- Total comments: {num_comments}
+
+{formatted_report}
+
+# IMPORTANT COUNT DATA (VERIFICATION)
+- Total issues: {num_issues}
+- Total PRs: {num_prs}
+- Total comments: {num_comments}
+"""
+
+                # Update the LLM prompt to include the actual count values
+                if llm_prompt:
+                    prompt = llm_prompt.format(
+                        num_issues=num_issues,
+                        num_prs=num_prs,
+                        num_comments=num_comments,
+                    )
+                else:
+                    prompt = """
+                    This is a GitHub activity report with recent issues, pull requests, and comments.
+                    
+                    Please provide a concise summary with the following sections.
+                    
+                    ## Executive Summary
+                    A comprehensive overview of the overall activity and the most significant developments.
+                    Include the following:
+                    - The overall state of the project and its momentum
+                    - Major themes or patterns across the reported activity
+                    - Implications of these developments for users and developers
+                    - Notable shifts in project direction or focus
+                    
+                    ## Key Metrics
+                    - Total issues: {num_issues}
+                    - Total PRs: {num_prs}
+                    - Total comments: {num_comments}
+                    - List all repositories mentioned in the report
+                    
+                    **Contributors:**
+                    Create a complete table showing ALL active contributors including bots and automated services.
+                    The table MUST include:
+                    | Contributor | PRs Created | Issues Created | Comments Made | Total Activity |
+                    
+                    Add a "TOTAL" row at the bottom that sums each column.
+                    
+                    IMPORTANT: The "TOTAL" row should match the actual database counts exactly:
+                    - The sum of the "PRs Created" column MUST EQUAL {num_prs}
+                    - The sum of the "Issues Created" column MUST EQUAL {num_issues}
+                    - The sum of the "Comments Made" column MUST EQUAL {num_comments}
+                    - The "Total Activity" column should equal the sum of the other columns for each contributor
+                    
+                    CRITICAL: Double-check that the "Comments Made" TOTAL equals EXACTLY {num_comments}, which is the correct count from the database.
+                    
+                    ## Development Focus Areas
+                    Identify 3-5 main areas of development based on the data, such as:
+                    - New features being developed
+                    - Major bug fixes or issues being addressed
+                    - Infrastructure or technical improvements
+                    - Documentation or community initiatives
+                    
+                    For each focus area:
+                    - Explain why this work matters to the project
+                    - Describe the potential impact on users and developers
+                    - Note any dependencies or connections between focus areas
+                    - Identify any patterns or trends in this development area
+                    
+                    ## Highlights
+                    Detailed descriptions of the most important issues and PRs, organized by focus area.
+                    
+                    For each highlight:
+                    - Use proper Markdown syntax to create links to GitHub issues/PRs like this: [#1234](https://github.com/owner/repo/issues/1234)
+                    - Explain what problem it solves and why it matters
+                    - Describe the technical approach being taken
+                    - Discuss its significance to the project's roadmap
+                    - Mention any broader implications or dependencies
+                    - Note any related discussions or decisions
+                    
+                    IMPORTANT: Always use full Markdown links for any issues or PRs mentioned.
+                    
+                    ## Action Items
+                    Suggest 3-5 areas that may need attention based on the activity.
+                    For each action item:
+                    - Explain why each needs attention
+                    - Describe the potential impact if addressed or not addressed
+                    - Note any dependencies or prerequisites
+                    - Suggest possible approaches or next steps
+                    """.format(
+                        num_issues=num_issues,
+                        num_prs=num_prs,
+                        num_comments=num_comments,
+                    )
+
+                llm_response = send_to_llm(
+                    formatted_report_with_counts,
+                    llm_key,
+                    llm_model,
+                    prompt,
+                    show_llm_preview,
+                )
+
+                # Verify if the counts are included in the response
+                if not show_llm_preview:
+                    counts_included = (
+                        f"Total issues: {num_issues}" in llm_response
+                        and f"Total PRs: {num_prs}" in llm_response
+                        and f"Total comments: {num_comments}" in llm_response
+                    )
+
+                    if not counts_included:
+                        llm_response = f"""WARNING: The summary below may contain incorrect statistics.
+The actual counts from the database are:
+- Total issues: {num_issues}
+- Total PRs: {num_prs}
+- Total comments: {num_comments}
+
+{llm_response}"""
+
                 click.echo("\n--- " + llm_model + " Summary ---\n")
                 click.echo(llm_response)
             elif no_llm:
                 click.echo("\nSkipping LLM summarization (--no-llm flag set).")
             else:
-                click.echo("\nReport generated. Use --llm to send to LLM for summarization.")
+                click.echo(
+                    "\nReport generated. Use --llm to send to LLM for summarization."
+                )
 
 
 if __name__ == "__main__":
