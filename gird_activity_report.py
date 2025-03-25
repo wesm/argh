@@ -1558,9 +1558,9 @@ def cli(
 
 ## Key Metrics
 - **Issues Created:** {len(activity.get('issues', []))}
-- **Pull Requests Created:** {len(activity.get('prs', []))}
+- **Pull Requests Created:** {len(activity.get('pull_requests', []))}
 - **Comments Added:** {len(activity.get('comments', []))}
-- **Repositories:** {', '.join(sorted(set(item.get('repository', '') for item in activity.get('issues', []) + activity.get('prs', []))))}
+- **Repositories:** {', '.join(sorted(set(item.get('repository', '') for item in activity.get('issues', []) + activity.get('pull_requests', []))))}
 
 {contributors_section}
 
