@@ -815,7 +815,7 @@ def format_activity_for_report(
 def send_to_llm(
     report_text,
     api_key,
-    model_name="claude-3-7-sonnet-20240229",
+    model_name="claude-3-7-sonnet-latest",
     custom_prompt=None,
     dry_run=False,
 ):
@@ -825,7 +825,7 @@ def send_to_llm(
     Args:
         report_text: The text of the report to summarize
         api_key: API key for the LLM service
-        model_name: The model name to use (default: "claude-3-7-sonnet-20240229")
+        model_name: The model name to use (default: "claude-3-7-sonnet-latest")
         custom_prompt: Optional custom prompt to use
         dry_run: If True, only print the prompt without making API calls
 
@@ -844,8 +844,13 @@ def send_to_llm(
             )
 
             # Default prompt for chunked reports - updated to request structured data
-            prompt = """
-            This is chunk """ + str(i + 1) + "/" + str(len(report_chunks)) + """ from a GitHub activity report.
+            prompt = (
+                """
+            This is chunk """
+                + str(i + 1)
+                + "/"
+                + str(len(report_chunks))
+                + """ from a GitHub activity report.
             
             Please analyze this chunk and provide a structured summary with the following sections.
             IMPORTANT: Use EXACTLY these section headers and formats to ensure statistics can be properly aggregated:
@@ -886,6 +891,7 @@ def send_to_llm(
             
             CRITICAL: Ensure ALL numerical data is accurate - use exact counts from the data.
             """
+            )
             full_prompt = prompt + "\n\n" + chunk
 
             if dry_run:
@@ -1188,8 +1194,8 @@ def list_repositories(db, list_repos):
 @click.option("--llm-key", help="LLM API key")
 @click.option(
     "--llm-model",
-    default="claude-3-7-sonnet-20240229",
-    help="Model name to use (default: claude-3-7-sonnet-20240229)",
+    default="claude-3-7-sonnet-latest",
+    help="Model name to use (default: claude-3-7-sonnet-latest)",
 )
 @click.option("--llm-prompt", help="Custom prompt for the LLM")
 @click.option(
