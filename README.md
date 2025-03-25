@@ -113,86 +113,94 @@ The `gird_activity_report.py` script can generate GitHub activity reports from t
 
 - Filtering by date range or looking back a specific number of days
 - Filtering by specific repositories
-- Including top contributors and most active discussions
-- Splitting reports by time periods (chunks)
-- Sending reports to LLMs for summarization via APIs
+- Including all contributors with accurate activity counts
+- Generating markdown-formatted reports with clickable links
+- Advanced LLM analysis focusing on significant developments and their implications
 
 #### Basic Usage
 
 ```bash
-# List available repositories
-python gird_activity_report.py list-repositories --db github_issues.db
-
-# Generate a report
-python gird_activity_report.py generate-report [OPTIONS]
+python gird_activity_report.py --days 7
 ```
 
 #### Report Generator Options
 
-```bash
-# Common options
---db TEXT                  Path to the GIRD SQLite database (default: github_issues.db)
-
-# List repositories command
-python gird_activity_report.py list-repositories [OPTIONS]
-  --db TEXT                Path to the GIRD SQLite database (default: github_issues.db)
-
-# Generate report command
-python gird_activity_report.py generate-report [OPTIONS]
-  --db TEXT                Path to the GIRD SQLite database (default: github_issues.db)
-  --days INTEGER           Number of days to look back (default: 7)
-  --start-date TEXT        Start date (YYYY-MM-DD)
-  --end-date TEXT          End date (YYYY-MM-DD)
-  --repos TEXT             Specific repositories to filter by (owner/name format). Can be used multiple times.
-  --output TEXT            Output file for the report (default: stdout)
-  --top-contributors INTEGER  Number of top contributors to include (default: 10, 0 to disable)
-  --hot-issues INTEGER     Number of most active issues to include (default: 5, 0 to disable)
-  --chunk-size INTEGER     Maximum characters per chunk for large reports (default: 20000)
-  --time-chunks INTEGER    Split report into time chunks of specified days (optional)
-  --llm                    Send the report to an LLM for summarization
-  --llm-key TEXT           LLM API key
-  --llm-model TEXT         Model name to use (default: claude-3.5-sonnet)
-  --llm-prompt TEXT        Custom prompt for the LLM
-  --dry-run               Show prompts that would be sent to the LLM without making API calls
-  --verbose               Display full report content in addition to LLM summary
-  --no-llm                Skip LLM summarization and only generate raw activity data
+```
+Options:
+  --db-path TEXT               Path to GIRD SQLite database (default: github_issues.db)
+  --output TEXT                Path to save the report (default: print to stdout)
+  --days INTEGER               Number of days to include in the report (default: 7)
+  --start-date TEXT            Start date for the report (format: YYYY-MM-DD). Overrides --days if specified.
+  --end-date TEXT              End date for the report (format: YYYY-MM-DD). Defaults to today if not specified.
+  --repositories TEXT          Comma-separated list of repositories to include (default: all)
+  --llm-api-key TEXT           API key for the LLM (default: LLM_API_KEY environment variable)
+  --llm-model TEXT             Model name for the LLM (default: claude-3-7-sonnet-latest)
+  --llm-provider [anthropic|openai]
+                               LLM provider to use (default: anthropic)
+  --dry-run                    Don't actually send to LLM, just show what would be sent
+  --custom-prompt TEXT         Custom prompt to use for the LLM (overrides the default)
+  --verbose                    Include additional details like comment bodies in the report
+  --help                       Show this message and exit.
 ```
 
 #### Report Generator Examples
 
-List all repositories in the database:
+Generate a report for the last 7 days:
 ```bash
-python gird_activity_report.py list-repositories
+python gird_activity_report.py
 ```
 
-Generate a report for the last 30 days:
+Generate a report for a specific date range with end of day inclusivity:
 ```bash
-python gird_activity_report.py generate-report --days 30
-```
-
-Generate a report for a specific date range:
-```bash
-python gird_activity_report.py generate-report --start-date 2023-01-01 --end-date 2023-01-31
+python gird_activity_report.py --start-date 2025-03-15 --end-date 2025-03-25
 ```
 
 Generate a report for specific repositories:
 ```bash
-python gird_activity_report.py generate-report --repos owner/repo1 --repos owner/repo2
+python gird_activity_report.py --repositories "owner/repo1,owner/repo2"
 ```
 
-Generate a report with custom options and save to file:
+Generate a report and analyze with OpenAI:
 ```bash
-python gird_activity_report.py generate-report --days 14 --top-contributors 5 --hot-issues 3 --output report.md
+python gird_activity_report.py --llm-provider openai --llm-model gpt-4-turbo
 ```
 
-Split activity into weekly chunks:
+Generate a detailed verbose report (includes comment bodies):
 ```bash
-python gird_activity_report.py generate-report --days 30 --time-chunks 7
+python gird_activity_report.py --verbose --output full_report.md
 ```
 
-Generate a report and send to an LLM for summarization:
+Preview the LLM prompt without making API calls:
 ```bash
-python gird_activity_report.py generate-report --days 14 --llm --llm-key your_api_key
+python gird_activity_report.py --dry-run
+```
+
+#### LLM-Enhanced Reports
+
+The activity report can use LLM capabilities (Claude or OpenAI) to generate insightful analysis of the GitHub activity. The enhanced reports include:
+
+1. **Comprehensive Metrics**: Accurate counts of issues, PRs, comments and complete contributor statistics
+2. **Significant Developments Analysis**: In-depth analysis of important changes including:
+   - Explanation of WHY changes are being made and problems being solved
+   - Technical insights and architectural implications
+   - Connection of individual changes to broader themes or project goals
+   - Future impact assessment of current work
+
+To generate these enhanced reports, ensure you have:
+1. An API key for either Anthropic (Claude) or OpenAI
+2. The `chatlas` Python package installed:
+   ```bash
+   pip install chatlas
+   ```
+
+Set your API key via environment variable:
+```bash
+export LLM_API_KEY=your_api_key
+```
+
+Or provide it directly:
+```bash
+python gird_activity_report.py --llm-api-key your_api_key
 ```
 
 ## Database Schema
