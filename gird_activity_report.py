@@ -720,12 +720,22 @@ def format_activity_for_report(
 
     # Add report header with date range
     if start_date and end_date:
-        output.append(
-            "# GitHub Activity Report: "
-            + start_date.strftime("%Y-%m-%d")
-            + " to "
-            + end_date.strftime("%Y-%m-%d")
-        )
+        # Format the date range more accurately
+        # If dates are within the same month and year
+        if start_date.year == end_date.year and start_date.month == end_date.month:
+            output.append(
+                f"# GitHub Activity Report: {start_date.strftime('%B %d')} - {end_date.strftime('%d, %Y')}"
+            )
+        # If dates are in the same year but different months
+        elif start_date.year == end_date.year:
+            output.append(
+                f"# GitHub Activity Report: {start_date.strftime('%B %d')} - {end_date.strftime('%B %d, %Y')}"
+            )
+        # If dates are in different years
+        else:
+            output.append(
+                f"# GitHub Activity Report: {start_date.strftime('%B %d, %Y')} - {end_date.strftime('%B %d, %Y')}"
+            )
     else:
         output.append("# GitHub Activity Report")
 
@@ -849,16 +859,8 @@ def format_activity_for_report(
             number = issue.get("issue_number", 0)
             title = issue.get("issue_title", "")
             if number > 0 and title:
-                github_link = "https://github.com/" + repo + "/issues/" + str(number)
-                output.append(
-                    "- ["
-                    + str(number)
-                    + " "
-                    + title
-                    + "]("
-                    + github_link
-                    + ")"
-                )
+                github_link = f"https://github.com/{repo}/issues/{number}"
+                output.append(f"- [{repo} #{number}: {title}]({github_link})")
     else:
         output.append("*No issues in this time period*")
 
@@ -870,16 +872,8 @@ def format_activity_for_report(
             number = pr.get("issue_number", 0)
             title = pr.get("issue_title", "")
             if number > 0 and title:
-                github_link = "https://github.com/" + repo + "/pull/" + str(number)
-                output.append(
-                    "- ["
-                    + str(number)
-                    + " "
-                    + title
-                    + "]("
-                    + github_link
-                    + ")"
-                )
+                github_link = f"https://github.com/{repo}/pull/{number}"
+                output.append(f"- [{repo} #{number}: {title}]({github_link})")
     else:
         output.append("*No pull requests in this time period*")
 
@@ -962,10 +956,12 @@ def send_to_llm(
             ## DETAILS
             - Brief but substantive descriptions of the most important issues and PRs
             - Include not just what they are but WHY they matter
-            - Noteworthy discussions or decisions
-            - Technical details that would help understand the significance
+            - Describe the technical approach being taken
+            - Discuss its significance to the project's roadmap
+            - Mention any broader implications or dependencies
+            - Note any related discussions or decisions
             
-            CRITICAL: Ensure ALL numerical data is accurate - use exact counts from the data.
+            IMPORTANT: Ensure ALL numerical data is accurate - use exact counts from the data.
             """
             )
             full_prompt = prompt + "\n\n" + chunk
