@@ -842,34 +842,46 @@ def format_activity_for_report(
     # Add a references section with all links in one place
     output.append("\n## References")
     output.append("### Issues")
-    for issue in issues:
-        repo = issue.get("repository", "unknown/repo")
-        number = issue.get("issue_number", 0)
-        github_link = "https://github.com/" + repo + "/issues/" + str(number)
-        output.append(
-            "- ["
-            + str(number)
-            + " "
-            + issue.get("issue_title", "Untitled")
-            + "]("
-            + github_link
-            + ")"
-        )
+    valid_issues = [issue for issue in issues if issue.get("issue_number", 0) > 0]
+    if valid_issues:
+        for issue in valid_issues:
+            repo = issue.get("repository", "unknown/repo")
+            number = issue.get("issue_number", 0)
+            title = issue.get("issue_title", "")
+            if number > 0 and title:
+                github_link = "https://github.com/" + repo + "/issues/" + str(number)
+                output.append(
+                    "- ["
+                    + str(number)
+                    + " "
+                    + title
+                    + "]("
+                    + github_link
+                    + ")"
+                )
+    else:
+        output.append("*No issues in this time period*")
 
     output.append("\n### Pull Requests")
-    for pr in prs:
-        repo = pr.get("repository", "unknown/repo")
-        number = pr.get("issue_number", 0)
-        github_link = "https://github.com/" + repo + "/pull/" + str(number)
-        output.append(
-            "- ["
-            + str(number)
-            + " "
-            + pr.get("issue_title", "Untitled")
-            + "]("
-            + github_link
-            + ")"
-        )
+    valid_prs = [pr for pr in prs if pr.get("issue_number", 0) > 0]
+    if valid_prs:
+        for pr in valid_prs:
+            repo = pr.get("repository", "unknown/repo")
+            number = pr.get("issue_number", 0)
+            title = pr.get("issue_title", "")
+            if number > 0 and title:
+                github_link = "https://github.com/" + repo + "/pull/" + str(number)
+                output.append(
+                    "- ["
+                    + str(number)
+                    + " "
+                    + title
+                    + "]("
+                    + github_link
+                    + ")"
+                )
+    else:
+        output.append("*No pull requests in this time period*")
 
     return "\n".join(output)
 
