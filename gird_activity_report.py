@@ -49,6 +49,7 @@ OPENAI_AVAILABLE = False
 
 try:
     from chatlas import ChatAnthropic
+
     ANTHROPIC_AVAILABLE = True
     CHATLAS_AVAILABLE = True
 except ImportError:
@@ -56,6 +57,7 @@ except ImportError:
 
 try:
     from chatlas import ChatOpenAI
+
     OPENAI_AVAILABLE = True
     CHATLAS_AVAILABLE = True
 except ImportError:
@@ -70,69 +72,79 @@ DEFAULT_DB_PATH = "github_issues.db"
 DEFAULT_DAYS = 7
 MAX_LINE_WIDTH = 90  # Maximum width for text wrapping
 
+
 def wrap_text(text, width=MAX_LINE_WIDTH):
     """
     Wrap text to fit within specified width while preserving Markdown formatting.
-    
+
     Args:
         text: Text to wrap
         width: Maximum width for each line (default: MAX_LINE_WIDTH)
-        
+
     Returns:
         Wrapped text
     """
     # Don't wrap if text is None or empty
     if not text:
         return text
-        
-    lines = text.split('\n')
+
+    lines = text.split("\n")
     wrapped_lines = []
-    
+
     for line in lines:
         # Skip wrapping for code blocks, tables, and other special Markdown elements
-        if line.startswith('```') or line.startswith('|') or line.startswith('#') or \
-           line.startswith('- ') or line.startswith('* ') or line.startswith('> ') or \
-           line.strip() == '---' or line.strip() == '':
+        if (
+            line.startswith("```")
+            or line.startswith("|")
+            or line.startswith("#")
+            or line.startswith("- ")
+            or line.startswith("* ")
+            or line.startswith("> ")
+            or line.strip() == "---"
+            or line.strip() == ""
+        ):
             wrapped_lines.append(line)
             continue
-            
+
         # Wrap the line
         current_width = 0
         wrapped_line = []
-        words = line.split(' ')
-        
+        words = line.split(" ")
+
         for word in words:
             if current_width + len(word) + 1 > width and current_width > 0:
-                wrapped_lines.append(' '.join(wrapped_line))
+                wrapped_lines.append(" ".join(wrapped_line))
                 wrapped_line = [word]
                 current_width = len(word)
             else:
                 wrapped_line.append(word)
                 current_width += len(word) + 1
-                
+
         if wrapped_line:
-            wrapped_lines.append(' '.join(wrapped_line))
-            
-    return '\n'.join(wrapped_lines)
+            wrapped_lines.append(" ".join(wrapped_line))
+
+    return "\n".join(wrapped_lines)
+
 
 def format_date(date_str):
     """
     Format a date string from ISO format to a more readable format.
-    
+
     Args:
         date_str: ISO format date string (e.g. "2023-04-25T15:30:15Z")
-        
+
     Returns:
         Formatted date string (e.g. "Apr 25, 2023")
     """
     try:
         # Parse ISO format date
-        date_obj = datetime.datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+        date_obj = datetime.datetime.fromisoformat(date_str.replace("Z", "+00:00"))
         # Format to a more readable format
         return date_obj.strftime("%b %d, %Y")
     except (ValueError, AttributeError):
         # Return the original string if parsing fails
         return date_str
+
 
 class GirdDatabase:
     """Class to interact with the GIRD SQLite database."""
@@ -602,6 +614,9 @@ def chunk_report_for_llm(report, max_chars=20000):
     Returns:
         list: List of report chunks
     """
+    # Strip markdown comments before chunking
+    report = strip_markdown_comments(report)
+
     # If report is under the limit, return it as a single chunk
     if len(report) <= max_chars:
         return [report]
@@ -696,6 +711,28 @@ def chunk_report_for_llm(report, max_chars=20000):
     return chunks
 
 
+def strip_markdown_comments(text):
+    """
+    Remove GitHub-style markdown comments from the text to reduce size for LLM processing.
+
+    Args:
+        text (str): The markdown text that may contain HTML-style comments
+
+    Returns:
+        str: Text with all <!-- --> comments removed
+    """
+    # Pattern to match HTML-style comments (including multiline)
+    pattern = r"<!--(.*?)-->"
+
+    # Remove all comments using re.DOTALL to match across multiple lines
+    cleaned_text = re.sub(pattern, "", text, flags=re.DOTALL)
+
+    # Remove any empty lines that might be left
+    cleaned_text = re.sub(r"\n\s*\n", "\n\n", cleaned_text)
+
+    return cleaned_text
+
+
 def format_activity_for_report(
     activity,
     start_date=None,
@@ -762,7 +799,7 @@ def format_activity_for_report(
             number = issue.get("issue_number", 0)
             # Create proper Markdown link
             github_link = f"https://github.com/{repo}/issues/{number}"
-            
+
             output.append(
                 f"### [{repo} #{number}]({github_link}): {issue.get('issue_title', 'Untitled')}"
             )
@@ -771,11 +808,11 @@ def format_activity_for_report(
             output.append(
                 "**Created on:** " + format_date(issue.get("created_at", "unknown"))
             )
-            
+
             # Add labels if present
             if "labels" in issue and issue["labels"]:
                 output.append("**Labels:** " + ", ".join(issue["labels"]))
-            
+
             output.append("")
             if "body" in issue and issue["body"]:
                 # Wrap the issue body text for better readability
@@ -792,18 +829,20 @@ def format_activity_for_report(
             number = pr.get("issue_number", 0)
             # Create proper Markdown link
             github_link = f"https://github.com/{repo}/pull/{number}"
-            
+
             output.append(
                 f"### [{repo} #{number}]({github_link}): {pr.get('issue_title', 'Untitled')}"
             )
             output.append("")
             output.append("**Created by:** " + pr.get("user_login", "unknown"))
-            output.append("**Created on:** " + format_date(pr.get("created_at", "unknown")))
-            
+            output.append(
+                "**Created on:** " + format_date(pr.get("created_at", "unknown"))
+            )
+
             # Add labels if present
             if "labels" in pr and pr["labels"]:
                 output.append("**Labels:** " + ", ".join(pr["labels"]))
-            
+
             output.append("")
             if "body" in pr and pr["body"]:
                 # Wrap the PR body text for better readability
@@ -902,6 +941,9 @@ def send_to_llm(
     Returns:
         The LLM response
     """
+    # Strip markdown comments before chunking
+    report_text = strip_markdown_comments(report_text)
+
     # Check if the report needs to be chunked
     report_chunks = chunk_report_for_llm(report_text)
 
@@ -925,33 +967,15 @@ def send_to_llm(
             Please analyze this chunk and provide a structured summary with the following sections.
             IMPORTANT: Use EXACTLY these section headers and formats to ensure statistics can be properly aggregated:
             
-            ## STATS
-            - Issues in this chunk: [number]
-            - PRs in this chunk: [number]
-            - Comments in this chunk: [number]
-            - Authors in this chunk: [comma-separated list with no other text]
-            - Repositories in this chunk: [comma-separated list of repositories]
+            ## STATISTICS
+            - Number of new issues: [exact count]
+            - Number of new PRs: [exact count]
+            - Number of comments: [exact count]
+            - Most active repositories: [list them]
             
-            ## CONTRIBUTOR_DATA
-            Create a table with EXACTLY these columns:
-            | Contributor | PRs Created | Issues Created | Comments Made | Total Activity |
-            
-            Include ALL contributors with their exact counts.
-            Use number values only in the table cells, not text descriptions.
-            Add a "TOTAL" row at the bottom that sums each column.
-            
-            IMPORTANT: The "TOTAL" row should match the actual database counts exactly:
-            - The sum of the "PRs Created" column MUST EQUAL {num_prs}
-            - The sum of the "Issues Created" column MUST EQUAL {num_issues}
-            - The sum of the "Comments Made" column MUST EQUAL {num_comments}
-            - The "Total Activity" column should equal the sum of the other columns for each contributor
-            
-            CRITICAL: Double-check that the "Comments Made" TOTAL equals EXACTLY {num_comments}, which is the correct count from the database.
-            
-            ## KEY_THEMES
-            - Main areas of development or focus in this chunk
-            - Notable features being worked on
-            - Significant bugs or issues being addressed
+            ## KEY DEVELOPMENTS
+            - List the 3-5 most significant things that happened in this period
+            - Focus on major features, important bugs, or significant discussions
             
             ## DETAILS
             - Brief but substantive descriptions of the most important issues and PRs
@@ -987,15 +1011,21 @@ def send_to_llm(
                     if provider == "anthropic":
                         # Create a ChatAnthropic instance
                         if not ANTHROPIC_AVAILABLE:
-                            raise ImportError("ChatAnthropic is not available. Please install with: pip install chatlas")
+                            raise ImportError(
+                                "ChatAnthropic is not available. Please install with: pip install chatlas"
+                            )
                         chat = ChatAnthropic(api_key=api_key, model=model_name)
                     elif provider == "openai":
                         # Create a ChatOpenAI instance
                         if not OPENAI_AVAILABLE:
-                            raise ImportError("ChatOpenAI is not available. Please install with: pip install chatlas")
+                            raise ImportError(
+                                "ChatOpenAI is not available. Please install with: pip install chatlas"
+                            )
                         chat = ChatOpenAI(api_key=api_key, model=model_name)
                     else:
-                        raise ValueError("Invalid provider. Use 'anthropic' or 'openai'.")
+                        raise ValueError(
+                            "Invalid provider. Use 'anthropic' or 'openai'."
+                        )
 
                     # Get response
                     response = chat.chat(full_prompt, echo="none")
@@ -1011,7 +1041,7 @@ def send_to_llm(
         # Send combined summaries for final synthesis with improved prompt
         final_prompt = """
         You've been given summaries from different chunks of a GitHub activity report. 
-        Each chunk contains structured sections including STATS, CONTRIBUTOR_DATA, KEY_THEMES, and DETAILS.
+        Each chunk contains structured sections including STATISTICS, KEY DEVELOPMENTS, and DETAILS.
         
         **MOST IMPORTANT RULE: At the beginning of the input you've been given
         IMPORTANT COUNT DATA with the EXACT number of issues, PRs, and comments.
@@ -1096,12 +1126,16 @@ def send_to_llm(
                 if provider == "anthropic":
                     # Create a ChatAnthropic instance
                     if not ANTHROPIC_AVAILABLE:
-                        raise ImportError("ChatAnthropic is not available. Please install with: pip install chatlas")
+                        raise ImportError(
+                            "ChatAnthropic is not available. Please install with: pip install chatlas"
+                        )
                     chat = ChatAnthropic(api_key=api_key, model=model_name)
                 elif provider == "openai":
                     # Create a ChatOpenAI instance
                     if not OPENAI_AVAILABLE:
-                        raise ImportError("ChatOpenAI is not available. Please install with: pip install chatlas")
+                        raise ImportError(
+                            "ChatOpenAI is not available. Please install with: pip install chatlas"
+                        )
                     chat = ChatOpenAI(api_key=api_key, model=model_name)
                 else:
                     raise ValueError("Invalid provider. Use 'anthropic' or 'openai'.")
@@ -1208,12 +1242,16 @@ def send_to_llm(
                 if provider == "anthropic":
                     # Create a ChatAnthropic instance
                     if not ANTHROPIC_AVAILABLE:
-                        raise ImportError("ChatAnthropic is not available. Please install with: pip install chatlas")
+                        raise ImportError(
+                            "ChatAnthropic is not available. Please install with: pip install chatlas"
+                        )
                     chat = ChatAnthropic(api_key=api_key, model=model_name)
                 elif provider == "openai":
                     # Create a ChatOpenAI instance
                     if not OPENAI_AVAILABLE:
-                        raise ImportError("ChatOpenAI is not available. Please install with: pip install chatlas")
+                        raise ImportError(
+                            "ChatOpenAI is not available. Please install with: pip install chatlas"
+                        )
                     chat = ChatOpenAI(api_key=api_key, model=model_name)
                 else:
                     raise ValueError("Invalid provider. Use 'anthropic' or 'openai'.")
@@ -1297,14 +1335,18 @@ def cli(
             raise ValueError(
                 "LLM API key must be provided via --llm-api-key or LLM_API_KEY environment variable"
             )
-    
+
     # Check provider availability
     if not dry_run:
         if llm_provider == "anthropic" and not ANTHROPIC_AVAILABLE:
-            raise ImportError("ChatAnthropic is not available. Please install with: pip install chatlas")
+            raise ImportError(
+                "ChatAnthropic is not available. Please install with: pip install chatlas"
+            )
         elif llm_provider == "openai" and not OPENAI_AVAILABLE:
-            raise ImportError("ChatOpenAI is not available. Please install with: pip install chatlas")
-    
+            raise ImportError(
+                "ChatOpenAI is not available. Please install with: pip install chatlas"
+            )
+
     # Open database connection
     with GirdDatabase(db_path) as gird_db:
         # Determine date range
@@ -1313,11 +1355,15 @@ def cli(
 
         # Get activity data
         activity = gird_db.get_recent_activity(
-            start_date_obj, end_date_obj, repositories.split(",") if repositories else None
+            start_date_obj,
+            end_date_obj,
+            repositories.split(",") if repositories else None,
         )
 
         # Format for output
-        report = format_activity_for_report(activity, start_date=start_date_obj, end_date=end_date_obj)
+        report = format_activity_for_report(
+            activity, start_date=start_date_obj, end_date=end_date_obj
+        )
 
         # Wrap report text to fit within MAX_LINE_WIDTH
         wrapped_report = wrap_text(report)
