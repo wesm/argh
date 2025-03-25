@@ -1028,7 +1028,7 @@ def format_activity_for_report(
                 title = issue.get("title", "").strip()
                 # Skip entries with no title or issue number 0
                 if number > 0 and title:
-                    # Keep full markdown links only in the References section
+                    # Format as clickable markdown links
                     github_link = f"https://github.com/{repo}/issues/{number}"
                     output.append(f"- [{repo}#{number}: {title}]({github_link})")
 
@@ -1045,10 +1045,9 @@ def format_activity_for_report(
             title = pr.get("title", "").strip()
             # Skip entries with no title or PR number 0
             if number > 0 and title:
-                # Keep full markdown links only in the References section
+                # Format as clickable markdown links
                 github_link = f"https://github.com/{repo}/pull/{number}"
                 output.append(f"- [{repo}#{number}: {title}]({github_link})")
-
     return "\n".join(output)
 
 
@@ -1195,8 +1194,8 @@ def send_to_llm(
         You've been given summaries from different chunks of a GitHub activity report. 
         Each chunk contains structured sections including contributor data, statistics, key developments, and details.
         
-        **MOST IMPORTANT RULE: You MUST preserve the ORIGINAL CONTRIBUTOR TABLE from the input EXACTLY as it appears.
-        DO NOT modify, summarize, or rearrange any contributor data.**
+        **MOST IMPORTANT RULE: You MUST preserve and include the COMPLETE CONTRIBUTOR TABLE exactly as it appears.
+        IT IS MANDATORY TO INCLUDE THE FULL TABLE - NO EXCEPTIONS.**
         
         Your task is to synthesize these into a SINGLE COHERENT REPORT with the following sections.
         **Format your response using Markdown syntax** to make it compatible with tools like Slack:
@@ -1212,8 +1211,12 @@ def send_to_llm(
         - Most active repositories: List the repositories from all chunks with the highest activity
         
         ## Contributors
-        **CRITICAL: Copy the EXACT complete contributor table that appears in the input.
-        Do not modify the data, format, or sorting of contributors in ANY way.**
+        **YOU MUST REPRODUCE THE ENTIRE CONTRIBUTOR TABLE FROM THE REPORT**
+        **IT IS ESSENTIAL THAT YOU INCLUDE THE FULL TABLE IN MARKDOWN FORMAT**
+        **DO NOT ABBREVIATE, SUMMARIZE OR DROP THIS TABLE**
+        **INCLUDE EVERY SINGLE CONTRIBUTOR AND THEIR STATISTICS**
+        **MAINTAIN the exact same format, columns, and sorting as in the original report**
+        **INCLUDE the TOTAL row at the bottom of the table**
         
         ## Significant Developments
         IMPORTANT: This is the most valuable section of your analysis. DEEPLY ANALYZE all the content you've
@@ -1224,7 +1227,7 @@ def send_to_llm(
         - Important architectural changes or decisions
         - Recurring themes or focus areas in the development work
         
-        Include specific examples with issue/PR numbers and quotes from discussions where relevant.
+        Include specific examples with references to issues/PRs as clickable markdown links (e.g., [repo#123](https://github.com/repo/issues/123))
         Explain the importance and implications of the key developments:
         - What problems are these changes solving?
         - What do these changes mean for the project's future direction?
@@ -1304,19 +1307,19 @@ def send_to_llm(
            - Total comments: [exact count ONLY if provided]
            - Most active repositories: [ONLY list repositories mentioned in the report]
         
-        3. Contributors - COPY the EXACT contributor table from the report
-           - DO NOT MODIFY the contributor data in ANY WAY
-           - DO NOT SUMMARIZE or GROUP contributors
-           - LIST ALL contributors EXACTLY as shown in the report
-           - INCLUDE the exact counts for issues, PRs, comments, and total activity
-           - MAINTAIN the sorting order from the report
+        3. Contributors - YOU MUST REPRODUCE THE ENTIRE CONTRIBUTOR TABLE FROM THE REPORT
+           - IT IS ESSENTIAL THAT YOU INCLUDE THE FULL TABLE IN MARKDOWN FORMAT
+           - DO NOT ABBREVIATE, SUMMARIZE OR DROP THIS TABLE 
+           - INCLUDE EVERY SINGLE CONTRIBUTOR AND THEIR STATISTICS
+           - MAINTAIN the exact same format, columns, and sorting as in the original report
+           - INCLUDE the TOTAL row at the bottom of the table
         
         4. Significant Developments - IMPORTANT: Read ALL issue/PR descriptions and comments thoroughly
            - Identify major features being developed or completed
            - Highlight significant bugs fixed or issues addressed
            - Note any important architectural changes or decisions
            - Mention any recurring themes or focus areas in the development work
-           - Provide specific examples and references to issues/PRs (e.g., repo#123)
+           - Provide specific examples with references to issues/PRs as clickable markdown links (e.g., [repo#123](https://github.com/repo/issues/123))
            - Explain the importance and implications of these developments
            - What do these changes mean for the project's future direction?
            - What problems are these changes solving?
