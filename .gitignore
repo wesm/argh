@@ -9,6 +9,9 @@ gird
 # Config files
 /config.json
 
+# .db files
+*.db
+
 # Test binary, built with `go test -c`
 *.test
 

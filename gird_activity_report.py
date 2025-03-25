@@ -793,18 +793,38 @@ def send_to_llm(
         for i, chunk in enumerate(report_chunks):
             print(f"Processing chunk {i + 1}/{len(report_chunks)}...")
 
-            # Default prompt for chunked reports
+            # Default prompt for chunked reports - updated to request structured data
             prompt = (
                 custom_prompt
-                or """
-            This is chunk {i}/{total} from a GitHub activity report.
-            Please summarize the key activity in this chunk focusing on:
-            1. Important issues and PRs
-            2. Most active contributors
-            3. Emerging patterns or trends
+                or f"""
+            This is chunk {i + 1}/{len(report_chunks)} from a GitHub activity report.
             
-            Keep your summary concise and actionable.
-            """.format(i=i + 1, total=len(report_chunks))
+            Please analyze this chunk and provide a structured summary with the following sections:
+            
+            1. STATISTICS:
+               - Count of important issues and their issue numbers
+               - Count of important PRs and their PR numbers
+               - List of active contributors (EXCLUDING BOTS like github-actions[bot]) with:
+                 * Number of PRs created
+                 * Number of issues created
+                 * Number of comments made
+                 * Total activity count
+               - Any other relevant metrics
+            
+            2. KEY_THEMES:
+               - Main areas of development or focus in this chunk
+               - Notable features being worked on
+               - Significant bugs or issues being addressed
+            
+            3. DETAILS:
+               - Brief but substantive descriptions of the most important issues and PRs
+               - Include not just what they are but WHY they matter
+               - Noteworthy discussions or decisions
+               - Technical details that would help understand the significance
+            
+            Keep your analysis detailed enough to be merged with other chunks later.
+            Use consistent formatting so statistics can be easily aggregated.
+            """
             )
 
             full_prompt = prompt + "\n\n" + chunk
@@ -827,63 +847,139 @@ def send_to_llm(
                     
                     # Get response
                     response = chat.chat(full_prompt, echo="none")
-                    all_responses.append(
-                        f"--- Chunk {i + 1} Summary ---\n\n{str(response)}"
-                    )
+                    all_responses.append(str(response))
                 except Exception as e:
                     all_responses.append(f"Error processing chunk {i + 1}: {str(e)}")
 
         # Combine all responses
         combined_response = "\n\n".join(all_responses)
 
-        # If custom final summary is requested, send combined summaries for final synthesis
-        if len(all_responses) > 1:
-            final_prompt = """You've been given summaries of different time chunks from a GitHub activity report.
-                Please synthesize these into a single coherent summary that highlights the most important information.
-                Focus on key themes, most active contributors, and highest-impact issues/PRs across the whole period.
-                """
-
-            full_final_prompt = final_prompt + "\n\n" + combined_response
-            
-            if dry_run:
-                print("\n===== DRY RUN: FINAL SYNTHESIS PROMPT =====")
-                print(f"Model: {model_name}")
-                print(f"Prompt length: {len(full_final_prompt)} characters")
-                print("\n--- Prompt start ---")
-                print(full_final_prompt[:1000] + "..." if len(full_final_prompt) > 1000 else full_final_prompt)
-                print("--- Prompt end ---\n")
-                return f"[DRY RUN] This is where the final synthesis would be shown.\n\n{combined_response}"
-            else:
-                try:
-                    # Create a ChatAnthropic instance
-                    chat = ChatAnthropic(
-                        api_key=api_key,
-                        model=model_name
-                    )
-                    
-                    # Get final synthesis response
-                    final_response = chat.chat(full_final_prompt, echo="none")
-                    return f"# Overall Summary\n\n{str(final_response)}\n\n# Individual Chunk Summaries\n\n{combined_response}"
-                except Exception as e:
-                    return (
-                        f"{combined_response}\n\nError creating final synthesis: {str(e)}"
-                    )
-
-        return combined_response
+        # Send combined summaries for final synthesis with improved prompt
+        final_prompt = f"""
+        You've been given summaries from different chunks of a GitHub activity report. 
+        Each chunk contains STATISTICS, KEY_THEMES, and DETAILS sections.
+        
+        Your task is to synthesize these into a SINGLE COHERENT REPORT with the following sections.
+        **Format your response using Markdown syntax** to make it compatible with tools like Slack:
+        
+        ## 📋 EXECUTIVE SUMMARY
+        A comprehensive overview of the overall activity and the most significant developments.
+        Be specific and detailed about what's happening in the project.
+        
+        ## 📊 KEY METRICS
+        - Total number of significant issues and PRs
+        - Most active repositories
+        - **Contributors**: Create a table showing all active contributors (EXCLUDING BOTS like github-actions[bot]) with:
+          * Number of PRs created
+          * Number of issues created
+          * Number of comments made
+          * Total activity
+        
+        ## 🔍 DEVELOPMENT FOCUS AREAS
+        Identify 3-5 main areas of development based on the data, such as:
+        - New features being developed
+        - Major bug fixes or issues being addressed
+        - Infrastructure or technical improvements
+        - Documentation or community initiatives
+        
+        For each focus area, provide detailed context on why this work matters to the project.
+        
+        ## ✨ HIGHLIGHTS
+        Detailed descriptions of the most important issues and PRs, organized by focus area.
+        Include relevant issue/PR numbers for reference.
+        
+        For each highlight:
+        - Explain what problem it solves
+        - Describe the technical approach
+        - Note its significance to the project
+        - Mention any related discussions or decisions
+        
+        ## 🚨 ACTION ITEMS
+        Suggest 3-5 areas that may need attention based on the activity, explain why each needs attention,
+        and what the potential impact could be.
+        
+        IMPORTANT: 
+        - Your report should be a single coherent document that doesn't reference individual chunks
+        - Someone reading this should have no idea that the data was ever processed in chunks
+        - Use rich Markdown formatting including headers, lists, tables, and emphasis for readability
+        - Provide deep technical detail where it adds value to understanding the project's status
+        - Exclude any references to bots like github-actions[bot] in your analysis
+        """
+        
+        full_final_prompt = final_prompt + "\n\n" + combined_response
+        
+        if dry_run:
+            print("\n===== DRY RUN: FINAL SYNTHESIS PROMPT =====")
+            print(f"Model: {model_name}")
+            print(f"Prompt length: {len(full_final_prompt)} characters")
+            print("\n--- Prompt start ---")
+            print(full_final_prompt[:1000] + "..." if len(full_final_prompt) > 1000 else full_final_prompt)
+            print("--- Prompt end ---\n")
+            return "[DRY RUN] This is where the final synthesis would be shown."
+        else:
+            try:
+                # Create a ChatAnthropic instance
+                chat = ChatAnthropic(
+                    api_key=api_key,
+                    model=model_name
+                )
+                
+                # Get final synthesis response - return only this, not the individual chunks
+                final_response = chat.chat(full_final_prompt, echo="none")
+                return str(final_response)
+            except Exception as e:
+                return f"Error creating final synthesis: {str(e)}\n\nRaw chunk data (for debugging):\n{combined_response}"
     else:
-        # For single chunk reports
+        # For single chunk reports - updated prompt to match the structure of the final report
         prompt = (
             custom_prompt
-            or """
-        Please analyze this GitHub activity report and provide a concise summary that:
-        1. Highlights the most significant issues and PRs
-        2. Identifies the most active contributors and their focus areas
-        3. Summarizes the overall trends and themes in the activity
-
-        Your summary should help someone who's been away quickly understand what happened and what might need their attention.
+            or f"""
+        Please analyze this GitHub activity report and provide a comprehensive summary.
+        **Format your response using Markdown syntax** to make it compatible with tools like Slack:
+        
+        ## 📋 EXECUTIVE SUMMARY
+        A comprehensive overview of the overall activity and the most significant developments.
+        Be specific and detailed about what's happening in the project.
+        
+        ## 📊 KEY METRICS
+        - Total number of significant issues and PRs
+        - Most active repositories
+        - **Contributors**: Create a table showing all active contributors (EXCLUDING BOTS like github-actions[bot]) with:
+          * Number of PRs created
+          * Number of issues created
+          * Number of comments made
+          * Total activity
+        
+        ## 🔍 DEVELOPMENT FOCUS AREAS
+        Identify 3-5 main areas of development based on the data, such as:
+        - New features being developed
+        - Major bug fixes or issues being addressed
+        - Infrastructure or technical improvements
+        - Documentation or community initiatives
+        
+        For each focus area, provide detailed context on why this work matters to the project.
+        
+        ## ✨ HIGHLIGHTS
+        Detailed descriptions of the most important issues and PRs, organized by focus area.
+        Include relevant issue/PR numbers for reference.
+        
+        For each highlight:
+        - Explain what problem it solves
+        - Describe the technical approach
+        - Note its significance to the project
+        - Mention any related discussions or decisions
+        
+        ## 🚨 ACTION ITEMS
+        Suggest 3-5 areas that may need attention based on the activity, explain why each needs attention,
+        and what the potential impact could be.
+        
+        IMPORTANT:
+        - Use rich Markdown formatting including headers, lists, tables, and emphasis for readability
+        - Provide deep technical detail where it adds value to understanding the project's status
+        - Exclude any references to bots like github-actions[bot] in your analysis
         """
         )
-
+        
         full_prompt = prompt + "\n\n" + report_text
         
         if dry_run:
