@@ -7,11 +7,33 @@ Generates reports for recent GitHub activity from a GIRD database.
 
 import os
 import re
-import sqlite3
 import datetime
+import sqlite3
 from typing import Dict, List, Optional
 import click
-from chatlas import ChatAnthropic
+
+# Try to import chatlas components
+CHATLAS_AVAILABLE = False
+ANTHROPIC_AVAILABLE = False
+OPENAI_AVAILABLE = False
+
+try:
+    from chatlas import ChatAnthropic
+    ANTHROPIC_AVAILABLE = True
+    CHATLAS_AVAILABLE = True
+except ImportError:
+    pass
+
+try:
+    from chatlas import ChatOpenAI
+    OPENAI_AVAILABLE = True
+    CHATLAS_AVAILABLE = True
+except ImportError:
+    pass
+
+if not CHATLAS_AVAILABLE:
+    print("Warning: chatlas package not found. Install with: pip install chatlas")
+    print("Continuing in case you're just using --dry-run...")
 
 # Constants
 DEFAULT_DB_PATH = "github_issues.db"
@@ -818,6 +840,7 @@ def send_to_llm(
     model_name="claude-3-7-sonnet-latest",
     custom_prompt=None,
     dry_run=False,
+    provider="anthropic",
 ):
     """
     Send the report to the specified LLM for summarization.
@@ -828,6 +851,7 @@ def send_to_llm(
         model_name: The model name to use (default: "claude-3-7-sonnet-latest")
         custom_prompt: Optional custom prompt to use
         dry_run: If True, only print the prompt without making API calls
+        provider: LLM provider to use (default: "anthropic", can also be "openai")
 
     Returns:
         The LLM response
@@ -912,8 +936,18 @@ def send_to_llm(
                 )
             else:
                 try:
-                    # Create a ChatAnthropic instance
-                    chat = ChatAnthropic(api_key=api_key, model=model_name)
+                    if provider == "anthropic":
+                        # Create a ChatAnthropic instance
+                        if not ANTHROPIC_AVAILABLE:
+                            raise ImportError("ChatAnthropic is not available. Please install with: pip install chatlas")
+                        chat = ChatAnthropic(api_key=api_key, model=model_name)
+                    elif provider == "openai":
+                        # Create a ChatOpenAI instance
+                        if not OPENAI_AVAILABLE:
+                            raise ImportError("ChatOpenAI is not available. Please install with: pip install chatlas")
+                        chat = ChatOpenAI(api_key=api_key, model=model_name)
+                    else:
+                        raise ValueError("Invalid provider. Use 'anthropic' or 'openai'.")
 
                     # Get response
                     response = chat.chat(full_prompt, echo="none")
@@ -1011,8 +1045,18 @@ def send_to_llm(
             return "[DRY RUN] This is where the final synthesis would be shown."
         else:
             try:
-                # Create a ChatAnthropic instance
-                chat = ChatAnthropic(api_key=api_key, model=model_name)
+                if provider == "anthropic":
+                    # Create a ChatAnthropic instance
+                    if not ANTHROPIC_AVAILABLE:
+                        raise ImportError("ChatAnthropic is not available. Please install with: pip install chatlas")
+                    chat = ChatAnthropic(api_key=api_key, model=model_name)
+                elif provider == "openai":
+                    # Create a ChatOpenAI instance
+                    if not OPENAI_AVAILABLE:
+                        raise ImportError("ChatOpenAI is not available. Please install with: pip install chatlas")
+                    chat = ChatOpenAI(api_key=api_key, model=model_name)
+                else:
+                    raise ValueError("Invalid provider. Use 'anthropic' or 'openai'.")
 
                 # Get final synthesis response - return only this, not the individual chunks
                 final_response = chat.chat(full_final_prompt, echo="none")
@@ -1113,8 +1157,18 @@ def send_to_llm(
             return "[DRY RUN] This is where the LLM response would be shown."
         else:
             try:
-                # Create a ChatAnthropic instance
-                chat = ChatAnthropic(api_key=api_key, model=model_name)
+                if provider == "anthropic":
+                    # Create a ChatAnthropic instance
+                    if not ANTHROPIC_AVAILABLE:
+                        raise ImportError("ChatAnthropic is not available. Please install with: pip install chatlas")
+                    chat = ChatAnthropic(api_key=api_key, model=model_name)
+                elif provider == "openai":
+                    # Create a ChatOpenAI instance
+                    if not OPENAI_AVAILABLE:
+                        raise ImportError("ChatOpenAI is not available. Please install with: pip install chatlas")
+                    chat = ChatOpenAI(api_key=api_key, model=model_name)
+                else:
+                    raise ValueError("Invalid provider. Use 'anthropic' or 'openai'.")
 
                 # Get response
                 response = chat.chat(full_prompt, echo="none")
@@ -1197,6 +1251,11 @@ def list_repositories(db, list_repos):
     default="claude-3-7-sonnet-latest",
     help="Model name to use (default: claude-3-7-sonnet-latest)",
 )
+@click.option(
+    "--llm-provider",
+    default="anthropic",
+    help="LLM provider to use (default: anthropic, can also be openai)",
+)
 @click.option("--llm-prompt", help="Custom prompt for the LLM")
 @click.option(
     "--dry-run",
@@ -1227,6 +1286,7 @@ def generate_report(
     llm,
     llm_key,
     llm_model,
+    llm_provider,
     llm_prompt,
     dry_run,
     verbose,
@@ -1357,7 +1417,12 @@ def generate_report(
                         + (" (DRY RUN)" if show_llm_preview else "")
                     )
                     llm_response = send_to_llm(
-                        chunk_report, llm_key, llm_model, llm_prompt, show_llm_preview
+                        chunk_report,
+                        llm_key,
+                        llm_model,
+                        llm_prompt,
+                        show_llm_preview,
+                        provider=llm_provider,
                     )
                     click.echo(
                         "\n--- " + llm_model + " Summary for Chunk " + str(i) + " ---\n"
@@ -1540,6 +1605,7 @@ def generate_report(
                     llm_model,
                     prompt,
                     show_llm_preview,
+                    provider=llm_provider,
                 )
 
                 # Verify if the counts are included in the response
