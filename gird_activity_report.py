@@ -821,9 +821,12 @@ def format_activity_for_report(
         )
 
         # Sort contributors by total activity (descending)
-        for contributor in sorted(
+        sorted_contributors = sorted(
             contributors, key=lambda x: x.get("total_activity", 0), reverse=True
-        ):
+        )
+
+        # Display ALL contributors, not just the top ones
+        for contributor in sorted_contributors:
             login = contributor.get("user_login", "unknown")
             issues_count = contributor.get("issue_count", 0)
             prs_count = contributor.get("pr_count", 0)
@@ -844,7 +847,7 @@ def format_activity_for_report(
             f"| **TOTAL** | **{total_issues}** | **{total_prs}** | **{total_comments}** | **{total_activity}** |"
         )
 
-        # Add explanation of any discrepancies
+        # Add explanation if totals don't match
         if (
             total_issues != len(issues)
             or total_prs != len(prs)
@@ -855,7 +858,8 @@ def format_activity_for_report(
             )
 
     # Format issues with GitHub links
-    if issues:
+    if issues and (verbose or dry_run):
+        # Only show issue details when verbose flag is enabled
         # Filter out invalid entries
         valid_issues = [
             issue
@@ -868,7 +872,7 @@ def format_activity_for_report(
             for issue in valid_issues:
                 repo = issue.get("repository", "unknown/repo")
                 number = issue.get("number", 0)
-                title = issue.get("title", "Untitled")
+                title = issue.get("title", "").strip()
 
                 # More concise issue reference format for the report
                 output.append(f"### {repo}#{number}: {title}")
@@ -886,21 +890,26 @@ def format_activity_for_report(
                 if issue_body:
                     # Strip markdown comments from the issue body
                     issue_body = strip_markdown_comments(issue_body)
-
-                if issue_body and (verbose or dry_run):
-                    # Wrap the issue body text for better readability
                     output.append(wrap_text(issue_body))
-                elif issue_body:
-                    # Just include a note that there's content when not in verbose mode
-                    output.append(
-                        "*Issue description omitted. Use --verbose to see full content*"
-                    )
                 else:
                     output.append("*No description provided*")
                 output.append("\n---\n")
+    elif issues and not verbose and not dry_run:
+        # Add a note about issues when not in verbose mode
+        valid_issues = [
+            issue
+            for issue in issues
+            if issue.get("number", 0) > 0 and issue.get("title", "").strip()
+        ]
+        if valid_issues:
+            output.append("\n## New Issues")
+            output.append(
+                f"*{len(valid_issues)} issues found. Use --verbose to see details.*\n"
+            )
 
     # Format pull requests with GitHub links
-    if prs:
+    if prs and (verbose or dry_run):
+        # Only show PR details when verbose flag is enabled
         # Filter out invalid entries
         valid_prs = [
             pr for pr in prs if pr.get("number", 0) > 0 and pr.get("title", "").strip()
@@ -911,7 +920,7 @@ def format_activity_for_report(
             for pr in valid_prs:
                 repo = pr.get("repository", "unknown/repo")
                 number = pr.get("number", 0)
-                title = pr.get("title", "Untitled")
+                title = pr.get("title", "").strip()
 
                 # More concise PR reference format for the report
                 output.append(f"### {repo}#{number}: {title}")
@@ -929,18 +938,20 @@ def format_activity_for_report(
                 if pr_body:
                     # Strip markdown comments from the PR body
                     pr_body = strip_markdown_comments(pr_body)
-
-                if pr_body and (verbose or dry_run):
-                    # Wrap the PR body text for better readability
                     output.append(wrap_text(pr_body))
-                elif pr_body:
-                    # Just include a note that there's content when not in verbose mode
-                    output.append(
-                        "*PR description omitted. Use --verbose to see full content*"
-                    )
                 else:
                     output.append("*No description provided*")
                 output.append("\n---\n")
+    elif prs and not verbose and not dry_run:
+        # Add a note about PRs when not in verbose mode
+        valid_prs = [
+            pr for pr in prs if pr.get("number", 0) > 0 and pr.get("title", "").strip()
+        ]
+        if valid_prs:
+            output.append("\n## New Pull Requests")
+            output.append(
+                f"*{len(valid_prs)} pull requests found. Use --verbose to see details.*\n"
+            )
 
     # Format comments with links to parent issues/PRs
     if comments and (verbose or dry_run):
@@ -995,45 +1006,49 @@ def format_activity_for_report(
         output.append(
             f"*{len(comments)} comments found. Use --verbose to see comment details.*\n"
         )
-    # Add a references section with all links in one place
-    output.append("\n## References")
-    output.append("### Issues")
-    # Filter valid issues for the References section too
-    valid_issues = [
-        issue
-        for issue in issues
-        if issue.get("number", 0) > 0 and issue.get("title", "").strip()
-    ]
-    valid_issues.sort(key=lambda x: x.get("repository", "") + str(x.get("number", 0)))
 
-    for issue in valid_issues:
-        if not issue.get("is_pull_request", False):
-            repo = issue.get("repository", "unknown/repo")
-            number = issue.get("number", 0)
-            title = issue.get("title", "").strip()
-            # Skip entries with no title or issue number 0
-            if number > 0 and title:
-                # Keep full markdown links only in the References section
-                github_link = f"https://github.com/{repo}/issues/{number}"
-                output.append(f"- [{repo}#{number}: {title}]({github_link})")
+    # Add a references section with all links in one place if in verbose mode
+    if verbose or dry_run:
+        output.append("\n## References")
+        output.append("### Issues")
+        # Filter valid issues for the References section too
+        valid_issues = [
+            issue
+            for issue in issues
+            if issue.get("number", 0) > 0 and issue.get("title", "").strip()
+        ]
+        valid_issues.sort(
+            key=lambda x: x.get("repository", "") + str(x.get("number", 0))
+        )
 
-    output.append("\n### Pull Requests")
-    # Filter valid PRs for the References section too
-    valid_prs = [
-        pr for pr in prs if pr.get("number", 0) > 0 and pr.get("title", "").strip()
-    ]
-    valid_prs.sort(key=lambda x: x.get("repository", "") + str(x.get("number", 0)))
+        for issue in valid_issues:
+            if not issue.get("is_pull_request", False):
+                repo = issue.get("repository", "unknown/repo")
+                number = issue.get("number", 0)
+                title = issue.get("title", "").strip()
+                # Skip entries with no title or issue number 0
+                if number > 0 and title:
+                    # Keep full markdown links only in the References section
+                    github_link = f"https://github.com/{repo}/issues/{number}"
+                    output.append(f"- [{repo}#{number}: {title}]({github_link})")
 
-    for pr in valid_prs:
-        if pr.get("is_pull_request", False):
+        output.append("\n### Pull Requests")
+        # Filter valid PRs for the References section too
+        valid_prs = [
+            pr for pr in prs if pr.get("number", 0) > 0 and pr.get("title", "").strip()
+        ]
+        valid_prs.sort(key=lambda x: x.get("repository", "") + str(x.get("number", 0)))
+
+        for pr in valid_prs:
             repo = pr.get("repository", "unknown/repo")
             number = pr.get("number", 0)
             title = pr.get("title", "").strip()
-            # Skip entries with no title or issue number 0
+            # Skip entries with no title or PR number 0
             if number > 0 and title:
                 # Keep full markdown links only in the References section
                 github_link = f"https://github.com/{repo}/pull/{number}"
                 output.append(f"- [{repo}#{number}: {title}]({github_link})")
+
     return "\n".join(output)
 
 
@@ -1044,6 +1059,8 @@ def send_to_llm(
     custom_prompt=None,
     dry_run=False,
     provider="anthropic",
+    activity=None,
+    verbose=False,
 ):
     """
     Send the report to the specified LLM for summarization.
@@ -1055,10 +1072,23 @@ def send_to_llm(
         custom_prompt: Optional custom prompt to use
         dry_run: If True, only print the prompt without making API calls
         provider: LLM provider to use (default: "anthropic", can also be "openai")
+        activity: The original activity data, used to create a verbose report for the LLM
+        verbose: Whether verbose mode is enabled in the user output
 
     Returns:
         The LLM response
     """
+    # If activity data is provided and the report is not already verbose,
+    # create a verbose version specifically for the LLM
+    if activity and not verbose and not dry_run:
+        print("Creating detailed report for LLM analysis...")
+        # Generate a verbose version of the report with all issue/PR/comment details
+        llm_report_text = format_activity_for_report(
+            activity, verbose=True, dry_run=True
+        )
+        # Use this verbose report for LLM processing
+        report_text = llm_report_text
+
     # Strip markdown comments before chunking
     report_text = strip_markdown_comments(report_text)
 
@@ -1066,12 +1096,19 @@ def send_to_llm(
     report_chunks = chunk_report_for_llm(report_text)
 
     if len(report_chunks) > 1:
+        print(f"Report split into {len(report_chunks)} chunks")
+
         # If we have multiple chunks, process each one separately
         all_responses = []
         for i, chunk in enumerate(report_chunks):
             print(
                 "Processing chunk " + str(i + 1) + "/" + str(len(report_chunks)) + "..."
             )
+
+            # Print chunk size info for debugging
+            print(f"  Chunk {i + 1} size: {len(chunk)} characters")
+            if dry_run:
+                print(f"  Chunk {i + 1} preview (first 100 chars): {chunk[:100]}...")
 
             # Default prompt for chunked reports - updated to request structured data
             prompt = f"""
@@ -1156,12 +1193,10 @@ def send_to_llm(
         # Send combined summaries for final synthesis with improved prompt
         final_prompt = """
         You've been given summaries from different chunks of a GitHub activity report. 
-        Each chunk contains structured sections including STATISTICS, KEY DEVELOPMENTS, and DETAILS.
+        Each chunk contains structured sections including contributor data, statistics, key developments, and details.
         
-        **MOST IMPORTANT RULE: At the beginning of the input you've been given
-        IMPORTANT COUNT DATA with the EXACT number of issues, PRs, and comments.
-        You MUST use these EXACT numbers in your Key Metrics section. Do not
-        calculate your own totals.**
+        **MOST IMPORTANT RULE: You MUST preserve the ORIGINAL CONTRIBUTOR TABLE from the input EXACTLY as it appears.
+        DO NOT modify, summarize, or rearrange any contributor data.**
         
         Your task is to synthesize these into a SINGLE COHERENT REPORT with the following sections.
         **Format your response using Markdown syntax** to make it compatible with tools like Slack:
@@ -1171,57 +1206,40 @@ def send_to_llm(
         Be specific and detailed about what's happening in the project.
         
         ## Key Metrics
-        CRITICAL: You MUST use the EXACT numbers from the "IMPORTANT COUNT DATA" section at the beginning of this report:
-        - Total issues: [Insert the EXACT number from IMPORTANT COUNT DATA]
-        - Total PRs: [Insert the EXACT number from IMPORTANT COUNT DATA]
-        - Total comments: [Insert the EXACT number from IMPORTANT COUNT DATA]
+        - Total issues: [Copy exact number from the input]
+        - Total PRs: [Copy exact number from the input]
+        - Total comments: [Copy exact number from the input]
         - Most active repositories: List the repositories from all chunks with the highest activity
         
-        **Contributors:**
-        Create a complete table showing ALL active contributors including bots and automated services.
-        The table MUST include:
-        | Contributor | PRs Created | Issues Created | Comments Made | Total Activity |
+        ## Contributors
+        **CRITICAL: Copy the EXACT complete contributor table that appears in the input.
+        Do not modify the data, format, or sorting of contributors in ANY way.**
         
-        Add a "TOTAL" row at the bottom that sums each column.
+        ## Significant Developments
+        IMPORTANT: This is the most valuable section of your analysis. DEEPLY ANALYZE all the content you've
+        been given about issues, pull requests, and comments to provide a comprehensive overview of:
         
-        IMPORTANT: The "TOTAL" row should match the actual database counts exactly:
-        - The sum of the "PRs Created" column MUST EQUAL {num_prs}
-        - The sum of the "Issues Created" column MUST EQUAL {num_issues}
-        - The sum of the "Comments Made" column MUST EQUAL {num_comments}
-        - The "Total Activity" column should equal the sum of the other columns for each contributor
+        - Major features being developed or completed
+        - Significant bugs fixed or issues addressed
+        - Important architectural changes or decisions
+        - Recurring themes or focus areas in the development work
         
-        CRITICAL: Double-check that the "Comments Made" TOTAL equals EXACTLY {num_comments}, which is the correct count from the database.
+        Include specific examples with issue/PR numbers and quotes from discussions where relevant.
+        Explain the importance and implications of the key developments:
+        - What problems are these changes solving?
+        - What do these changes mean for the project's future direction?
+        - How do these changes connect to the project's overall goals?
+        - What would someone who hasn't been following the project need to know?
         
-        ## Development Focus Areas
-        Identify 3-5 main areas of development based on the data, such as:
-        - New features being developed
-        - Major bug fixes or issues being addressed
-        - Infrastructure or technical improvements
-        - Documentation or community initiatives
-        
-        For each focus area, provide detailed context on why this work matters to the project.
-        
-        ## Highlights
-        Detailed descriptions of the most important issues and PRs, organized by focus area.
-        Include relevant issue/PR numbers for reference.
-        
-        For each highlight:
-        - Explain what problem it solves
-        - Describe the technical approach
-        - Note its significance to the project
-        - Mention any related discussions or decisions
-        
-        ## Action Items
-        Suggest 3-5 areas that may need attention based on the activity, explain why each needs attention,
-        and what the potential impact could be.
+        Organize this information in a way that helps the reader understand the overall direction and 
+        priorities of the project, rather than just listing individual changes.
         
         IMPORTANT: 
         - Your report should be a single coherent document that doesn't reference individual chunks
-        - All numerical data MUST be accurate - the total counts must exactly match the sum of the individual chunks
-        - Exclude any references to bots like github-actions[bot] in your analysis
+        - All numerical data MUST be accurate based on the data provided in the input
         - Use rich Markdown formatting including headers, lists, tables, and emphasis for readability
+        - Focus on DETAILED ANALYSIS of the actual content of issues, PRs and comments
         """
-
         full_final_prompt = final_prompt + "\n\n" + combined_response
 
         if dry_run:
@@ -1286,11 +1304,27 @@ def send_to_llm(
            - Total comments: [exact count ONLY if provided]
            - Most active repositories: [ONLY list repositories mentioned in the report]
         
-        3. Contributors Table - ONLY include if contributor data is provided in the report
-           - Do not make up or estimate contribution numbers
-           - Do not add contributors not mentioned in the report
+        3. Contributors - COPY the EXACT contributor table from the report
+           - DO NOT MODIFY the contributor data in ANY WAY
+           - DO NOT SUMMARIZE or GROUP contributors
+           - LIST ALL contributors EXACTLY as shown in the report
+           - INCLUDE the exact counts for issues, PRs, comments, and total activity
+           - MAINTAIN the sorting order from the report
+        
+        4. Significant Developments - IMPORTANT: Read ALL issue/PR descriptions and comments thoroughly
+           - Identify major features being developed or completed
+           - Highlight significant bugs fixed or issues addressed
+           - Note any important architectural changes or decisions
+           - Mention any recurring themes or focus areas in the development work
+           - Provide specific examples and references to issues/PRs (e.g., repo#123)
+           - Explain the importance and implications of these developments
+           - What do these changes mean for the project's future direction?
+           - What problems are these changes solving?
+           - What would someone who hasn't been following the project need to know?
         
         FINAL REMINDER: You MUST strictly adhere to facts presented in the report. Fabricating data is strictly prohibited.
+        Focus on DETAILED ANALYSIS of the actual content of issues, PRs and comments to provide insight into what's
+        happening in the project beyond just the numbers.
         """
         full_prompt = prompt + "\n\n" + report_text
 
@@ -1464,6 +1498,8 @@ def cli(
                 custom_prompt,
                 dry_run,
                 provider=llm_provider,
+                activity=activity,
+                verbose=verbose,
             )
             print(f"\n--- {llm_model} Summary ---\n")
             print(llm_response)
