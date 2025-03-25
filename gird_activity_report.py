@@ -809,6 +809,51 @@ def format_activity_for_report(
         output.append("- **Repositories:** " + str(len(repos)))
         output.append("  - " + ", ".join(sorted(repos)))
 
+    # Add contributors table
+    contributors = activity.get("contributors", [])
+    if contributors:
+        output.append("\n## Contributors")
+        output.append(
+            "| Contributor | Issues Created | PRs Created | Comments Made | Total Activity |"
+        )
+        output.append(
+            "|------------|----------------|-------------|---------------|----------------|"
+        )
+
+        # Sort contributors by total activity (descending)
+        for contributor in sorted(
+            contributors, key=lambda x: x.get("total_activity", 0), reverse=True
+        ):
+            login = contributor.get("user_login", "unknown")
+            issues_count = contributor.get("issue_count", 0)
+            prs_count = contributor.get("pr_count", 0)
+            comments_count = contributor.get("comment_count", 0)
+            total_activity = contributor.get("total_activity", 0)
+
+            output.append(
+                f"| {login} | {issues_count} | {prs_count} | {comments_count} | {total_activity} |"
+            )
+
+        # Add totals row
+        total_issues = sum(c.get("issue_count", 0) for c in contributors)
+        total_prs = sum(c.get("pr_count", 0) for c in contributors)
+        total_comments = sum(c.get("comment_count", 0) for c in contributors)
+        total_activity = sum(c.get("total_activity", 0) for c in contributors)
+
+        output.append(
+            f"| **TOTAL** | **{total_issues}** | **{total_prs}** | **{total_comments}** | **{total_activity}** |"
+        )
+
+        # Add explanation of any discrepancies
+        if (
+            total_issues != len(issues)
+            or total_prs != len(prs)
+            or total_comments != len(comments)
+        ):
+            output.append(
+                "\n**Note:** Totals may differ from summary counts due to filters or data processing."
+            )
+
     # Format issues with GitHub links
     if issues:
         # Filter out invalid entries
@@ -824,7 +869,7 @@ def format_activity_for_report(
                 repo = issue.get("repository", "unknown/repo")
                 number = issue.get("number", 0)
                 title = issue.get("title", "Untitled")
-                
+
                 # More concise issue reference format for the report
                 output.append(f"### {repo}#{number}: {title}")
                 output.append("**Created by:** " + issue.get("user_login", "unknown"))
@@ -847,7 +892,9 @@ def format_activity_for_report(
                     output.append(wrap_text(issue_body))
                 elif issue_body:
                     # Just include a note that there's content when not in verbose mode
-                    output.append("*Issue description omitted. Use --verbose to see full content*")
+                    output.append(
+                        "*Issue description omitted. Use --verbose to see full content*"
+                    )
                 else:
                     output.append("*No description provided*")
                 output.append("\n---\n")
@@ -865,7 +912,7 @@ def format_activity_for_report(
                 repo = pr.get("repository", "unknown/repo")
                 number = pr.get("number", 0)
                 title = pr.get("title", "Untitled")
-                
+
                 # More concise PR reference format for the report
                 output.append(f"### {repo}#{number}: {title}")
                 output.append("**Created by:** " + pr.get("user_login", "unknown"))
@@ -888,19 +935,25 @@ def format_activity_for_report(
                     output.append(wrap_text(pr_body))
                 elif pr_body:
                     # Just include a note that there's content when not in verbose mode
-                    output.append("*PR description omitted. Use --verbose to see full content*")
+                    output.append(
+                        "*PR description omitted. Use --verbose to see full content*"
+                    )
                 else:
                     output.append("*No description provided*")
                 output.append("\n---\n")
 
     # Format comments with links to parent issues/PRs
-    if comments:
+    if comments and (verbose or dry_run):
+        # Only show comments section when verbose flag is enabled
         # Filter out invalid entries
         valid_comments = [
             comment
             for comment in comments
             if comment.get("issue_number", 0) > 0
-            and (comment.get("issue_title", "").strip() or comment.get("body", "").strip())
+            and (
+                comment.get("issue_title", "").strip()
+                or comment.get("body", "").strip()
+            )
         ]
 
         if valid_comments:
@@ -910,13 +963,17 @@ def format_activity_for_report(
                 number = comment.get("issue_number", 0)
                 is_pr = comment.get("is_pull_request", False)
                 title = comment.get("issue_title", "").strip() or "Untitled"
-                
+
                 # More concise comment reference format for the report
                 comment_type = "PR" if is_pr else "Issue"
-                output.append(f"### Comment on {repo}#{number} ({comment_type}): {title}")
+                output.append(
+                    f"### Comment on {repo}#{number} ({comment_type}): {title}"
+                )
                 output.append("**Author:** " + comment.get("user_login", "unknown"))
                 output.append("**Repository:** " + repo)
-                output.append("**Created:** " + comment.get("created_at", "unknown date"))
+                output.append(
+                    "**Created:** " + comment.get("created_at", "unknown date")
+                )
 
                 # Get comment body and strip markdown comments
                 comment_body = comment.get("body", "")
@@ -930,16 +987,14 @@ def format_activity_for_report(
                     comment_text = comment_text[:497] + "..."
 
                 # Format the comment body with wrapping
-                if comment_body and (verbose or dry_run):
-                    output.append(wrap_text(comment_text))
-                elif comment_body:
-                    output.append(
-                        "*Comment text omitted. Use --verbose to see full content*"
-                    )
-                else:
-                    output.append("*No comment text provided*")
+                output.append(wrap_text(comment_text))
                 output.append("\n" + "-" * 50 + "\n")
-
+    elif comments and not verbose and not dry_run:
+        # Add a note about comments when not in verbose mode
+        output.append("\n## Recent Comments")
+        output.append(
+            f"*{len(comments)} comments found. Use --verbose to see comment details.*\n"
+        )
     # Add a references section with all links in one place
     output.append("\n## References")
     output.append("### Issues")
@@ -1245,9 +1300,7 @@ def send_to_llm(
             print("Prompt length: " + str(len(full_prompt)) + " characters")
             print("\n--- Prompt start ---")
             print(
-                full_prompt[:1000] + "..."
-                if len(full_prompt) > 1000
-                else full_prompt
+                full_prompt[:1000] + "..." if len(full_prompt) > 1000 else full_prompt
             )
             print("--- Prompt end ---\n")
             return "[DRY RUN] This is where the LLM response would be shown."
