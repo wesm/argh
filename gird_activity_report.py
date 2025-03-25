@@ -298,7 +298,7 @@ class GirdDatabase:
         start_date: datetime.datetime,
         end_date: datetime.datetime,
         repos: Optional[List[str]] = None,
-        limit: int = 10,
+        limit: int = None,
     ) -> List[Dict]:
         """Get top contributors based on activity within the date range.
 
@@ -306,7 +306,7 @@ class GirdDatabase:
             start_date: Start date for the activity window
             end_date: End date for the activity window
             repos: Optional list of repository names to filter by
-            limit: Maximum number of contributors to return
+            limit: Maximum number of contributors to return (None for all contributors)
 
         Returns:
             List of dictionaries with contributor information, sorted by activity count
@@ -393,24 +393,29 @@ class GirdDatabase:
             SUM(issue_count + pr_count + comment_count) as total_activity
         FROM 
             all_contributors
-        WHERE
-            user_type = 'User'
         GROUP BY 
             user_id, user_login, user_type
         ORDER BY 
             total_activity DESC
-        LIMIT ?
         """
         )
 
-        cursor.execute(
-            query,
-            [start_date_str, end_date_str]
-            + repo_params
-            + [start_date_str, end_date_str]
-            + repo_params
-            + [limit],
-        )
+        # Only add LIMIT clause if limit is specified
+        if limit is not None:
+            query += " LIMIT ?"
+            params = [
+                start_date_str, end_date_str
+            ] + repo_params + [
+                start_date_str, end_date_str
+            ] + repo_params + [limit]
+        else:
+            params = [
+                start_date_str, end_date_str
+            ] + repo_params + [
+                start_date_str, end_date_str
+            ] + repo_params
+
+        cursor.execute(query, params)
 
         return [dict(row) for row in cursor.fetchall()]
 
@@ -737,6 +742,8 @@ def format_activity_for_report(
     activity,
     start_date=None,
     end_date=None,
+    verbose=False,
+    dry_run=False,
 ):
     """
     Format the activity data for LLM consumption.
@@ -745,6 +752,8 @@ def format_activity_for_report(
         activity: Activity dictionary with issues, prs and comments
         start_date: Start date of the report period
         end_date: End date of the report period
+        verbose: Whether to include full details like comment bodies
+        dry_run: If True, show full content regardless of verbose flag
 
     Returns:
         Formatted markdown text suitable for sending to an LLM
@@ -814,9 +823,17 @@ def format_activity_for_report(
                 output.append("**Labels:** " + ", ".join(issue["labels"]))
 
             output.append("")
-            if "body" in issue and issue["body"]:
+            issue_body = issue.get("body", "")
+            if issue_body:
+                # Strip markdown comments from the issue body
+                issue_body = strip_markdown_comments(issue_body)
+            
+            if issue_body and (verbose or dry_run):
                 # Wrap the issue body text for better readability
-                output.append(wrap_text(issue["body"]))
+                output.append(wrap_text(issue_body))
+            elif issue_body:
+                # Just include a note that there's content when not in verbose mode
+                output.append("*Issue description omitted. Use --verbose to see full content*")
             else:
                 output.append("*No description provided*")
             output.append("\n---\n")
@@ -844,9 +861,17 @@ def format_activity_for_report(
                 output.append("**Labels:** " + ", ".join(pr["labels"]))
 
             output.append("")
-            if "body" in pr and pr["body"]:
+            pr_body = pr.get("body", "")
+            if pr_body:
+                # Strip markdown comments from the PR body
+                pr_body = strip_markdown_comments(pr_body)
+            
+            if pr_body and (verbose or dry_run):
                 # Wrap the PR body text for better readability
-                output.append(wrap_text(pr["body"]))
+                output.append(wrap_text(pr_body))
+            elif pr_body:
+                # Just include a note that there's content when not in verbose mode
+                output.append("*PR description omitted. Use --verbose to see full content*")
             else:
                 output.append("*No description provided*")
             output.append("\n---\n")
@@ -874,16 +899,22 @@ def format_activity_for_report(
             output.append("**Repository:** " + repo)
             output.append("**Created:** " + comment.get("created_at", "unknown date"))
 
+            # Get comment body and strip markdown comments
+            comment_body = comment.get("body", "")
+            if comment_body:
+                # Strip markdown comments from the comment body 
+                comment_body = strip_markdown_comments(comment_body)
+
             # Truncate very long comments
-            comment_text = (
-                comment.get("body", "") if comment.get("body") else "(Empty comment)"
-            )
+            comment_text = comment_body if comment_body else "(Empty comment)"
             if len(comment_text) > 500:
                 comment_text = comment_text[:497] + "..."
 
             # Format the comment body with wrapping
-            if "body" in comment and comment["body"]:
-                output.append(wrap_text(comment["body"]))
+            if comment_body and (verbose or dry_run):
+                output.append(wrap_text(comment_text))
+            elif comment_body:
+                output.append("*Comment text omitted. Use --verbose to see full content*")
             else:
                 output.append("*No comment text provided*")
             output.append("\n" + "-" * 50 + "\n")
@@ -956,13 +987,9 @@ def send_to_llm(
             )
 
             # Default prompt for chunked reports - updated to request structured data
-            prompt = (
-                """
+            prompt = """
             This is chunk """
-                + str(i + 1)
-                + "/"
-                + str(len(report_chunks))
-                + """ from a GitHub activity report.
+            + str(i + 1) + "/" + str(len(report_chunks)) + """ from a GitHub activity report.
             
             Please analyze this chunk and provide a structured summary with the following sections.
             IMPORTANT: Use EXACTLY these section headers and formats to ensure statistics can be properly aggregated:
@@ -987,7 +1014,6 @@ def send_to_llm(
             
             IMPORTANT: Ensure ALL numerical data is accurate - use exact counts from the data.
             """
-            )
             full_prompt = prompt + "\n\n" + chunk
 
             if dry_run:
@@ -1316,6 +1342,11 @@ def cli():
     default=None,
     help="Custom prompt to use for the LLM (overrides the default)",
 )
+@click.option(
+    "--verbose",
+    is_flag=True,
+    help="Include additional details like comment bodies in the report",
+)
 def cli(
     db_path,
     output,
@@ -1326,6 +1357,7 @@ def cli(
     llm_provider,
     dry_run,
     custom_prompt,
+    verbose,
 ):
     """Generate a report of GitHub activity from a GIRD database."""
     # Get API key from environment if not provided
@@ -1362,7 +1394,7 @@ def cli(
 
         # Format for output
         report = format_activity_for_report(
-            activity, start_date=start_date_obj, end_date=end_date_obj
+            activity, start_date=start_date_obj, end_date=end_date_obj, verbose=verbose, dry_run=dry_run
         )
 
         # Wrap report text to fit within MAX_LINE_WIDTH
