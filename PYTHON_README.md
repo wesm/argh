@@ -7,7 +7,7 @@ This Python script interfaces with the GIRD (GitHub Issues Repo Database) SQLite
 1. Install the required dependencies:
 
 ```bash
-pip install sqlite3 click requests
+pip install sqlite3 click requests chatlas
 ```
 
 2. Make sure you have a GIRD database file. This is created by running the main GIRD tool to sync repositories.
@@ -25,7 +25,7 @@ The `gird_activity_report.py` script can generate GitHub activity reports from t
 ### Installation
 
 ```bash
-pip install click requests
+pip install click requests chatlas
 ```
 
 ### Usage
@@ -64,8 +64,11 @@ python gird_activity_report.py generate-report [OPTIONS]
   --time-chunks INTEGER    Split report into time chunks of specified days (optional)
   --llm                    Send the report to an LLM for summarization
   --llm-key TEXT           LLM API key
-  --llm-model TEXT         Model name to use (default: claude-3-opus-20240229)
+  --llm-model TEXT         Model name to use (default: claude-3.5-sonnet)
   --llm-prompt TEXT        Custom prompt for the LLM
+  --dry-run               Show prompts that would be sent to the LLM without making API calls
+  --verbose               Display full report content in addition to LLM summary
+  --no-llm                Skip LLM summarization and only generate raw activity data
 ```
 
 ### Examples
@@ -105,9 +108,24 @@ Generate a report and send to an LLM for summarization:
 python gird_activity_report.py generate-report --days 14 --llm --llm-key your_api_key
 ```
 
+Generate a report without LLM summarization:
+```bash
+python gird_activity_report.py generate-report --days 14 --no-llm
+```
+
 Use a different LLM model:
 ```bash
-python gird_activity_report.py generate-report --days 14 --llm --llm-model claude-3-sonnet-20240229
+python gird_activity_report.py generate-report --days 14 --llm --llm-model claude-3-opus-20240229
+```
+
+Preview the prompts without making API calls:
+```bash
+python gird_activity_report.py generate-report --days 14 --dry-run
+```
+
+View the full report content:
+```bash
+python gird_activity_report.py generate-report --days 14 --verbose
 ```
 
 ## Enhanced Report Features
@@ -163,19 +181,26 @@ A consolidated references section at the end of each report provides a quick way
 
 ## Using with LLMs
 
+By default, the script will attempt to use an LLM to summarize the GitHub activity data unless the `--no-llm` flag is specified. 
+You will need to provide an API key either via the `--llm-key` parameter or by setting the `LLM_API_KEY` environment variable.
+
 To use LLMs for summarizing activity reports, you need to:
 
 1. Get an LLM API key from your chosen provider
-2. Install the required packages: `pip install requests`
-3. Use the `--llm` flag with your API key:
+2. Install the chatlas package via pip:
+   ```bash
+   pip install chatlas
+   ```
+
+3. Run the activity report script with the `--llm` flag:
+   ```bash
+   python gird_activity_report.py generate-report --days 7 --llm
+   ```
+
+When generating reports, the script now hides the full report content by default to reduce output verbosity. If you want to see both the raw report and the LLM summary, use the `--verbose` flag:
 
 ```bash
-# Using command line argument
-python gird_activity_report.py generate-report --llm --llm-key your_api_key
-
-# Or using environment variable
-export LLM_API_KEY=your_api_key
-python gird_activity_report.py generate-report --llm
+python gird_activity_report.py generate-report --days 7 --llm --verbose
 ```
 
 You can also customize the prompt for the LLM:
@@ -183,6 +208,35 @@ You can also customize the prompt for the LLM:
 ```bash
 python gird_activity_report.py generate-report --llm --llm-prompt "Generate a concise summary of the following GitHub activity with emphasis on high-priority issues"
 ```
+
+The script now uses Anthropic's Claude 3.5 Sonnet model by default, via the ChatAnthropic interface from the chatlas package. You can specify a different model if needed:
+
+```bash
+# Use Claude 3 Opus
+python gird_activity_report.py generate-report --llm --llm-model claude-3-opus-20240229
+
+# Use Claude 3 Haiku
+python gird_activity_report.py generate-report --llm --llm-model claude-3-haiku-20240307
+```
+
+The model names for Claude can be found in the [Anthropic documentation](https://docs.anthropic.com/claude/docs/models-overview).
+
+## Dry Run Mode
+
+The script provides a dry run mode that allows you to preview the prompts that would be sent to the LLM without actually making API calls. This is useful for testing and debugging:
+
+```bash
+python gird_activity_report.py generate-report --days 7 --dry-run
+```
+
+When using dry run mode:
+
+1. No actual API calls are made
+2. The script will display the prompts that would be sent to the LLM
+3. You'll see prompt length information and a truncated view of the content
+4. You don't need to provide an API key
+
+This allows you to fine-tune your reports and ensure you're getting the right content before consuming API credits.
 
 ## Notes
 

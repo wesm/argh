@@ -9,9 +9,9 @@ import os
 import re
 import sqlite3
 import datetime
-import json
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 import click
+from chatlas import ChatAnthropic
 
 # Constants
 DEFAULT_DB_PATH = "github_issues.db"
@@ -630,8 +630,8 @@ def format_activity_for_report(
     # Add repository stats if we have them
     repos = set()
     for item in issues + prs:
-        if "repo_full_name" in item:
-            repos.add(item["repo_full_name"])
+        if "repository" in item:
+            repos.add(item["repository"])
 
     if repos:
         output.append(f"- **Repositories:** {len(repos)}")
@@ -659,7 +659,7 @@ def format_activity_for_report(
         output.append("\n## Most Active Discussions")
         for i, issue in enumerate(hot_issues, 1):
             issue_type = "PR" if issue.get("is_pull_request", False) else "Issue"
-            repo = issue.get("repo_full_name", "unknown/repo")
+            repo = issue.get("repository", "unknown/repo")
             number = issue.get("issue_number", 0)
             github_link = f"https://github.com/{repo}/issues/{number}"
 
@@ -674,7 +674,7 @@ def format_activity_for_report(
     if issues:
         output.append("\n## New Issues")
         for issue in issues:
-            repo = issue.get("repo_full_name", "unknown/repo")
+            repo = issue.get("repository", "unknown/repo")
             number = issue.get("number", 0)
             github_link = f"https://github.com/{repo}/issues/{number}"
 
@@ -701,7 +701,7 @@ def format_activity_for_report(
     if prs:
         output.append("\n## New Pull Requests")
         for pr in prs:
-            repo = pr.get("repo_full_name", "unknown/repo")
+            repo = pr.get("repository", "unknown/repo")
             number = pr.get("number", 0)
             github_link = f"https://github.com/{repo}/pull/{number}"
 
@@ -722,17 +722,17 @@ def format_activity_for_report(
             output.append(description)
             output.append("\n" + "-" * 50 + "\n")
 
-    # Format comments with GitHub links
+    # Format comments with links to parent issues/PRs
     if comments:
-        output.append("\n## New Comments")
+        output.append("\n## Recent Comments")
         for comment in comments:
-            issue_or_pr = "PR" if comment.get("is_pull_request", False) else "Issue"
-            repo = comment.get("repo_full_name", "unknown/repo")
+            issue_type = "PR" if comment.get("is_pull_request", False) else "Issue"
+            repo = comment.get("repository", "unknown/repo")
             number = comment.get("issue_number", 0)
             github_link = f"https://github.com/{repo}/issues/{number}"
 
             output.append(
-                f"### Comment on [{issue_or_pr} #{number}]({github_link}) - {comment.get('issue_title', 'Untitled')}"
+                f"### Comment on [{issue_type} #{number}]({github_link}) - {comment.get('issue_title', 'Untitled')}"
             )
             output.append(f"**Author:** {comment.get('user_login', 'unknown')}")
             output.append(f"**Repository:** {repo}")
@@ -753,14 +753,14 @@ def format_activity_for_report(
     output.append("\n## References")
     output.append("### Issues")
     for issue in issues:
-        repo = issue.get("repo_full_name", "unknown/repo")
+        repo = issue.get("repository", "unknown/repo")
         number = issue.get("number", 0)
         github_link = f"https://github.com/{repo}/issues/{number}"
         output.append(f"- [#{number} {issue.get('title', 'Untitled')}]({github_link})")
 
     output.append("\n### Pull Requests")
     for pr in prs:
-        repo = pr.get("repo_full_name", "unknown/repo")
+        repo = pr.get("repository", "unknown/repo")
         number = pr.get("number", 0)
         github_link = f"https://github.com/{repo}/pull/{number}"
         output.append(f"- [#{number} {pr.get('title', 'Untitled')}]({github_link})")
@@ -769,7 +769,7 @@ def format_activity_for_report(
 
 
 def send_to_llm(
-    report_text, api_key, model_name="claude-3-opus-20240229", custom_prompt=None
+    report_text, api_key, model_name="claude-3-5-sonnet-20240620", custom_prompt=None, dry_run=False
 ):
     """
     Send the report to the specified LLM for summarization.
@@ -777,29 +777,18 @@ def send_to_llm(
     Args:
         report_text: The text of the report to summarize
         api_key: API key for the LLM service
-        model_name: The model name to use (default: "claude-3-opus-20240229")
+        model_name: The model name to use (default: "claude-3-5-sonnet-20240620")
         custom_prompt: Optional custom prompt to use
+        dry_run: If True, only print the prompt without making API calls
 
     Returns:
         The LLM response
     """
-    try:
-        import chatlas
-    except ImportError:
-        return (
-            "Error: chatlas package not installed. Install using 'pip install chatlas'"
-        )
-
-    client = chatlas.Client(api_key)
-
-    # Check if we need to chunk the report
+    # Check if the report needs to be chunked
     report_chunks = chunk_report_for_llm(report_text)
 
     if len(report_chunks) > 1:
-        print(
-            f"Report split into {len(report_chunks)} chunks for {model_name} processing"
-        )
-
+        # If we have multiple chunks, process each one separately
         all_responses = []
         for i, chunk in enumerate(report_chunks):
             print(f"Processing chunk {i + 1}/{len(report_chunks)}...")
@@ -818,43 +807,67 @@ def send_to_llm(
             """.format(i=i + 1, total=len(report_chunks))
             )
 
-            try:
-                response = client.create_message(
-                    messages=[{"role": "user", "content": prompt + "\n\n" + chunk}],
-                    model=model_name,
-                )
-                all_responses.append(
-                    f"--- Chunk {i + 1} Summary ---\n\n{response['content'][0]['text']}"
-                )
-            except Exception as e:
-                all_responses.append(f"Error processing chunk {i + 1}: {str(e)}")
+            full_prompt = prompt + "\n\n" + chunk
+            
+            if dry_run:
+                print(f"\n===== DRY RUN: PROMPT FOR CHUNK {i + 1} =====")
+                print(f"Model: {model_name}")
+                print(f"Prompt length: {len(full_prompt)} characters")
+                print("\n--- Prompt start ---")
+                print(full_prompt[:1000] + "..." if len(full_prompt) > 1000 else full_prompt)
+                print("--- Prompt end ---\n")
+                all_responses.append(f"[DRY RUN] Chunk {i + 1} summary would be generated here.")
+            else:
+                try:
+                    # Create a ChatAnthropic instance
+                    chat = ChatAnthropic(
+                        api_key=api_key,
+                        model=model_name
+                    )
+                    
+                    # Get response
+                    response = chat.chat(full_prompt, echo="none")
+                    all_responses.append(
+                        f"--- Chunk {i + 1} Summary ---\n\n{str(response)}"
+                    )
+                except Exception as e:
+                    all_responses.append(f"Error processing chunk {i + 1}: {str(e)}")
 
         # Combine all responses
         combined_response = "\n\n".join(all_responses)
 
         # If custom final summary is requested, send combined summaries for final synthesis
         if len(all_responses) > 1:
-            try:
-                final_prompt = """You've been given summaries of different time chunks from a GitHub activity report.
+            final_prompt = """You've been given summaries of different time chunks from a GitHub activity report.
                 Please synthesize these into a single coherent summary that highlights the most important information.
                 Focus on key themes, most active contributors, and highest-impact issues/PRs across the whole period.
                 """
 
-                final_response = client.create_message(
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": final_prompt + "\n\n" + combined_response,
-                        }
-                    ],
-                    model=model_name,
-                )
-
-                return f"# Overall Summary\n\n{final_response['content'][0]['text']}\n\n# Individual Chunk Summaries\n\n{combined_response}"
-            except Exception as e:
-                return (
-                    f"{combined_response}\n\nError creating final synthesis: {str(e)}"
-                )
+            full_final_prompt = final_prompt + "\n\n" + combined_response
+            
+            if dry_run:
+                print("\n===== DRY RUN: FINAL SYNTHESIS PROMPT =====")
+                print(f"Model: {model_name}")
+                print(f"Prompt length: {len(full_final_prompt)} characters")
+                print("\n--- Prompt start ---")
+                print(full_final_prompt[:1000] + "..." if len(full_final_prompt) > 1000 else full_final_prompt)
+                print("--- Prompt end ---\n")
+                return f"[DRY RUN] This is where the final synthesis would be shown.\n\n{combined_response}"
+            else:
+                try:
+                    # Create a ChatAnthropic instance
+                    chat = ChatAnthropic(
+                        api_key=api_key,
+                        model=model_name
+                    )
+                    
+                    # Get final synthesis response
+                    final_response = chat.chat(full_final_prompt, echo="none")
+                    return f"# Overall Summary\n\n{str(final_response)}\n\n# Individual Chunk Summaries\n\n{combined_response}"
+                except Exception as e:
+                    return (
+                        f"{combined_response}\n\nError creating final synthesis: {str(e)}"
+                    )
 
         return combined_response
     else:
@@ -871,14 +884,29 @@ def send_to_llm(
         """
         )
 
-        try:
-            response = client.create_message(
-                messages=[{"role": "user", "content": prompt + "\n\n" + report_text}],
-                model=model_name,
-            )
-            return response["content"][0]["text"]
-        except Exception as e:
-            return f"Error: {str(e)}"
+        full_prompt = prompt + "\n\n" + report_text
+        
+        if dry_run:
+            print("\n===== DRY RUN: PROMPT =====")
+            print(f"Model: {model_name}")
+            print(f"Prompt length: {len(full_prompt)} characters")
+            print("\n--- Prompt start ---")
+            print(full_prompt[:1000] + "..." if len(full_prompt) > 1000 else full_prompt)
+            print("--- Prompt end ---\n")
+            return "[DRY RUN] This is where the LLM response would be shown."
+        else:
+            try:
+                # Create a ChatAnthropic instance
+                chat = ChatAnthropic(
+                    api_key=api_key,
+                    model=model_name
+                )
+                
+                # Get response
+                response = chat.chat(full_prompt, echo="none")
+                return str(response)
+            except Exception as e:
+                return f"Error: {str(e)}"
 
 
 @click.group()
@@ -952,10 +980,25 @@ def list_repositories(db, list_repos):
 @click.option("--llm-key", help="LLM API key")
 @click.option(
     "--llm-model",
-    default="claude-3-opus-20240229",
-    help="Model name to use (default: claude-3-opus-20240229)",
+    default="claude-3-5-sonnet-20240620",
+    help="Model name to use (default: claude-3-5-sonnet-20240620)",
 )
 @click.option("--llm-prompt", help="Custom prompt for the LLM")
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Show prompts that would be sent to the LLM without making API calls",
+)
+@click.option(
+    "--verbose",
+    is_flag=True,
+    help="Display full report content in addition to LLM summary",
+)
+@click.option(
+    "--no-llm",
+    is_flag=True,
+    help="Skip LLM summarization and only generate raw activity data",
+)
 def generate_report(
     db,
     days,
@@ -971,8 +1014,31 @@ def generate_report(
     llm_key,
     llm_model,
     llm_prompt,
+    dry_run,
+    verbose,
+    no_llm,
 ):
     """Generate a GitHub activity report from the GIRD database."""
+    # Determine if we should use the LLM
+    use_llm = (llm or not no_llm) and not dry_run
+    show_llm_preview = dry_run
+    
+    # Check for API key if we need one
+    if (use_llm or show_llm_preview) and not llm_key:
+        llm_key = os.environ.get("LLM_API_KEY")
+        if not llm_key and not show_llm_preview:
+            click.echo(
+                "Error: LLM API key not provided. Use --llm-key or set LLM_API_KEY environment variable.\n"
+                "To run without LLM summarization, use --no-llm.\n"
+                "To preview LLM prompts without an API key, use --dry-run.",
+                err=True,
+            )
+            return
+
+    # If dry-run is enabled, a dummy key is fine
+    if show_llm_preview and not llm_key:
+        llm_key = "dry-run-mode-no-key-needed"
+
     # Open database connection
     with GirdDatabase(db) as gird_db:
         # Determine date range
@@ -1046,26 +1112,25 @@ def generate_report(
                         f.write(chunk_report)
                     click.echo(f"Chunk {i} report written to {chunk_filename}")
                 else:
-                    click.echo(chunk_report)
+                    # Only print report content if verbose mode is enabled
+                    if verbose or dry_run:
+                        click.echo(chunk_report)
+                    else:
+                        click.echo(f"Report chunk {i} generated. Use --verbose to see the content.")
 
                 # Send to LLM if requested
-                if llm:
-                    if not llm_key:
-                        llm_key = os.environ.get("LLM_API_KEY")
-                        if not llm_key:
-                            click.echo(
-                                "Error: LLM API key not provided. Use --llm-key or set LLM_API_KEY environment variable.",
-                                err=True,
-                            )
-                            return
-
+                if use_llm or show_llm_preview:
                     # Send to LLM and print response
-                    click.echo(f"\nSending chunk {i} to {llm_model} for analysis...")
+                    click.echo(f"\nSending chunk {i} to {llm_model} for analysis..." + (" (DRY RUN)" if show_llm_preview else ""))
                     llm_response = send_to_llm(
-                        chunk_report, llm_key, llm_model, llm_prompt
+                        chunk_report, llm_key, llm_model, llm_prompt, show_llm_preview
                     )
                     click.echo(f"\n--- {llm_model} Summary for Chunk {i} ---\n")
                     click.echo(llm_response)
+                elif no_llm:
+                    click.echo("\nSkipping LLM summarization (--no-llm flag set).")
+                else:
+                    click.echo("\nReport generated. Use --llm to send to LLM for summarization.")
         else:
             # Process the entire date range as a single report
 
@@ -1103,26 +1168,29 @@ def generate_report(
                     f.write(formatted_report)
                 click.echo(f"Report written to {output}")
             else:
-                click.echo(formatted_report)
+                # Only print report content if verbose mode is enabled
+                if verbose or dry_run:
+                    click.echo(formatted_report)
+                else:
+                    num_issues = len(activity.get("issues", []))
+                    num_prs = len(activity.get("pull_requests", []))
+                    num_comments = len(activity.get("comments", []))
+                    click.echo(f"Report generated with {num_issues} issues, {num_prs} PRs, and {num_comments} comments.")
+                    click.echo("Use --verbose to see the full report content.")
 
             # Send to LLM if requested
-            if llm:
-                if not llm_key:
-                    llm_key = os.environ.get("LLM_API_KEY")
-                    if not llm_key:
-                        click.echo(
-                            "Error: LLM API key not provided. Use --llm-key or set LLM_API_KEY environment variable.",
-                            err=True,
-                        )
-                        return
-
+            if use_llm or show_llm_preview:
                 # Use the chunking mechanism for LLM if the report is large
-                click.echo(f"\nSending report to {llm_model} for analysis...")
+                click.echo(f"\nSending report to {llm_model} for analysis..." + (" (DRY RUN)" if show_llm_preview else ""))
                 llm_response = send_to_llm(
-                    formatted_report, llm_key, llm_model, llm_prompt
+                    formatted_report, llm_key, llm_model, llm_prompt, show_llm_preview
                 )
                 click.echo(f"\n--- {llm_model} Summary ---\n")
                 click.echo(llm_response)
+            elif no_llm:
+                click.echo("\nSkipping LLM summarization (--no-llm flag set).")
+            else:
+                click.echo("\nReport generated. Use --llm to send to LLM for summarization.")
 
 
 if __name__ == "__main__":
