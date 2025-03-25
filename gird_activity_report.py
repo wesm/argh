@@ -90,7 +90,7 @@ class GirdDatabase:
         JOIN 
             users ON issues.user_id = users.id
         WHERE 
-            issues.created_at BETWEEN ? AND ?
+            issues.created_at >= ? AND issues.created_at <= ?
             """ + repo_filter + """
         ORDER BY 
             issues.created_at DESC
@@ -121,7 +121,7 @@ class GirdDatabase:
         JOIN 
             users ON comments.user_id = users.id
         WHERE 
-            comments.created_at BETWEEN ? AND ?
+            comments.created_at >= ? AND comments.created_at <= ?
             """ + repo_filter + """
         ORDER BY 
             comments.created_at DESC
@@ -182,70 +182,15 @@ class GirdDatabase:
         start_date_str = start_date.strftime("%Y-%m-%d %H:%M:%S")
         end_date_str = end_date.strftime("%Y-%m-%d %H:%M:%S")
 
-        # Query for contributors with counts of issues, PRs, and comments
-        query = """
-        WITH issue_counts AS (
-            SELECT 
-                users.id as user_id,
-                users.login as user_login,
-                COUNT(CASE WHEN issues.is_pull_request = 0 THEN 1 ELSE NULL END) as issue_count,
-                COUNT(CASE WHEN issues.is_pull_request = 1 THEN 1 ELSE NULL END) as pr_count
-            FROM 
-                issues
-            JOIN 
-                repositories ON issues.repository_id = repositories.id
-            JOIN 
-                users ON issues.user_id = users.id
-            WHERE 
-                issues.created_at BETWEEN ? AND ?
-                """ + repo_filter + """
-            GROUP BY 
-                users.id
-        ),
-        comment_counts AS (
-            SELECT 
-                users.id as user_id,
-                users.login as user_login,
-                COUNT(*) as comment_count
-            FROM 
-                comments
-            JOIN 
-                issues ON comments.issue_id = issues.id
-            JOIN 
-                repositories ON issues.repository_id = repositories.id
-            JOIN 
-                users ON comments.user_id = users.id
-            WHERE 
-                comments.created_at BETWEEN ? AND ?
-                """ + repo_filter + """
-            GROUP BY 
-                users.id
-        )
-        SELECT 
-            COALESCE(i.user_id, c.user_id) as user_id,
-            COALESCE(i.user_login, c.user_login) as user_login,
-            COALESCE(i.issue_count, 0) as issue_count,
-            COALESCE(i.pr_count, 0) as pr_count,
-            COALESCE(c.comment_count, 0) as comment_count,
-            (COALESCE(i.issue_count, 0) + COALESCE(i.pr_count, 0) + COALESCE(c.comment_count, 0)) as total_activity
-        FROM 
-            issue_counts i
-        FULL OUTER JOIN 
-            comment_counts c ON i.user_id = c.user_id
-        ORDER BY 
-            total_activity DESC
-        LIMIT ?
-        """
-
         # SQLite doesn't support FULL OUTER JOIN, so we need to use LEFT JOIN + UNION
         query = """
-        -- Contributors from issues
+        -- Contributors from issues and PRs
         WITH issue_creators AS (
             SELECT 
                 users.id as user_id,
                 users.login as user_login,
-                COUNT(CASE WHEN issues.is_pull_request = 0 THEN 1 ELSE NULL END) as issue_count,
-                COUNT(CASE WHEN issues.is_pull_request = 1 THEN 1 ELSE NULL END) as pr_count,
+                SUM(CASE WHEN issues.is_pull_request = 0 THEN 1 ELSE 0 END) as issue_count,
+                SUM(CASE WHEN issues.is_pull_request = 1 THEN 1 ELSE 0 END) as pr_count,
                 0 as comment_count
             FROM 
                 issues
@@ -254,10 +199,10 @@ class GirdDatabase:
             JOIN 
                 users ON issues.user_id = users.id
             WHERE 
-                issues.created_at BETWEEN ? AND ?
+                issues.created_at >= ? AND issues.created_at <= ?
                 """ + repo_filter + """
             GROUP BY 
-                users.id
+                users.id, users.login
         ),
         -- Contributors from comments
         commenters AS (
@@ -276,10 +221,10 @@ class GirdDatabase:
             JOIN 
                 users ON comments.user_id = users.id
             WHERE 
-                comments.created_at BETWEEN ? AND ?
+                comments.created_at >= ? AND comments.created_at <= ?
                 """ + repo_filter + """
             GROUP BY 
-                users.id
+                users.id, users.login
         ),
         -- Combine both contribution types
         all_contributors AS (
@@ -451,7 +396,11 @@ class GirdDatabase:
             )
 
             # Filter activity for this chunk
-            chunk_data = {"issues": [], "prs": [], "comments": []}
+            chunk_data = {
+                "issues": [],
+                "pull_requests": [],
+                "comments": []
+            }
 
             for issue in activity.get("issues", []):
                 issue_date = datetime.datetime.strptime(
@@ -465,7 +414,7 @@ class GirdDatabase:
                     pr["created_at"], "%Y-%m-%dT%H:%M:%SZ"
                 )
                 if chunk_start <= pr_date <= chunk_end:
-                    chunk_data["prs"].append(pr)
+                    chunk_data["pull_requests"].append(pr)
 
             for comment in activity.get("comments", []):
                 comment_date = datetime.datetime.strptime(
@@ -475,7 +424,7 @@ class GirdDatabase:
                     chunk_data["comments"].append(comment)
 
             # Only add chunk if it has any activity
-            if chunk_data["issues"] or chunk_data["prs"] or chunk_data["comments"]:
+            if chunk_data["issues"] or chunk_data["pull_requests"] or chunk_data["comments"]:
                 chunks.append(
                     {
                         "start_date": chunk_start,
@@ -593,7 +542,11 @@ def chunk_report_for_llm(report, max_chars=20000):
 
 
 def format_activity_for_report(
-    activity, top_contributors=None, hot_issues=None, start_date=None, end_date=None
+    activity,
+    top_contributors=None,
+    hot_issues=None,
+    start_date=None,
+    end_date=None,
 ):
     """
     Format the activity data for LLM consumption.
@@ -609,7 +562,7 @@ def format_activity_for_report(
         Formatted markdown text suitable for sending to an LLM
     """
     issues = activity.get("issues", [])
-    prs = activity.get("prs", [])
+    prs = activity.get("pull_requests", [])
     comments = activity.get("comments", [])
 
     output = []
@@ -807,12 +760,15 @@ def send_to_llm(
             - PRs in this chunk: [number]
             - Comments in this chunk: [number]
             - Authors in this chunk: [comma-separated list with no other text]
+            - Repositories in this chunk: [comma-separated list of repositories]
             
             ## CONTRIBUTOR_DATA
             Create a table with EXACTLY these columns:
             | Contributor | PRs Created | Issues Created | Comments Made | Total Activity |
             
-            Include ALL contributors (EXCLUDING BOTS like github-actions[bot]) with their exact counts.
+            Include ALL contributors with their exact counts EXCEPT:
+            - NEVER include github-actions[bot] or any account with [bot] in the name
+            - NEVER include dependabot or other automated services
             Use number values only in the table cells, not text descriptions.
             Add a "TOTAL" row at the bottom that sums each column.
             
@@ -877,11 +833,12 @@ def send_to_llm(
         - Total issues: [SUM of all "Issues in this chunk" counts from the STATS sections]
         - Total PRs: [SUM of all "PRs in this chunk" counts from the STATS sections]
         - Total comments: [SUM of all "Comments in this chunk" counts from the STATS sections]
-        - Most active repositories (from all chunks)
+        - Most active repositories: List the repositories from all chunks with the highest activity
         
         **Contributors:**
-        Create a complete table showing ALL active contributors (excluding bots).
-        
+        Create a complete table showing ALL active contributors BUT:
+        - NEVER include github-actions[bot] or any account with [bot] in the name
+        - NEVER include dependabot or other automated services
         The table MUST include:
         | Contributor | PRs Created | Issues Created | Comments Made | Total Activity |
         
@@ -957,11 +914,12 @@ def send_to_llm(
         ## Key Metrics
         IMPORTANT: These metrics must be NUMERICALLY ACCURATE based on the raw data:
         - Provide the exact count of issues, PRs, and comments from the report
-        - List the active repositories
+        - List all repositories mentioned in the report
         
         **Contributors:**
-        Create a complete table showing ALL active contributors (excluding bots).
-        
+        Create a complete table showing ALL active contributors BUT:
+        - NEVER include github-actions[bot] or any account with [bot] in the name
+        - NEVER include dependabot or other automated services
         The table MUST include:
         | Contributor | PRs Created | Issues Created | Comments Made | Total Activity |
         
