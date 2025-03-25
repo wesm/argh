@@ -1192,56 +1192,50 @@ def send_to_llm(
         # Send combined summaries for final synthesis with improved prompt
         final_prompt = """
         You've been given summaries from different chunks of a GitHub activity report. 
-        Each chunk contains structured sections including contributor data, statistics, key developments, and details.
+        Each chunk contains an analysis of significant developments from that chunk.
         
-        **MOST IMPORTANT RULE: You MUST preserve and include the COMPLETE CONTRIBUTOR TABLE exactly as it appears.
-        IT IS MANDATORY TO INCLUDE THE FULL TABLE - NO EXCEPTIONS.**
+        Your ONLY task is to combine these analyses into a SINGLE COMPREHENSIVE and INSIGHTFUL 
+        "Significant Developments" section. DO NOT include any other sections like Executive Summary, 
+        Contributors, or Key Metrics.
         
-        Your task is to synthesize these into a SINGLE COHERENT REPORT with the following sections.
-        **Format your response using Markdown syntax** to make it compatible with tools like Slack:
+        IMPORTANT: Your output should ONLY include the "Significant Developments" section.
         
-        ## Executive Summary
-        A comprehensive overview of the overall activity and the most significant developments.
-        Be specific and detailed about what's happening in the project.
-        
-        ## Key Metrics
-        - Total issues: [Copy exact number from the input]
-        - Total PRs: [Copy exact number from the input]
-        - Total comments: [Copy exact number from the input]
-        - Most active repositories: List the repositories from all chunks with the highest activity
-        
-        ## Contributors
-        **YOU MUST REPRODUCE THE ENTIRE CONTRIBUTOR TABLE FROM THE REPORT**
-        **IT IS ESSENTIAL THAT YOU INCLUDE THE FULL TABLE IN MARKDOWN FORMAT**
-        **DO NOT ABBREVIATE, SUMMARIZE OR DROP THIS TABLE**
-        **INCLUDE EVERY SINGLE CONTRIBUTOR AND THEIR STATISTICS**
-        **MAINTAIN the exact same format, columns, and sorting as in the original report**
-        **INCLUDE the TOTAL row at the bottom of the table**
+        Format your response as:
         
         ## Significant Developments
-        IMPORTANT: This is the most valuable section of your analysis. DEEPLY ANALYZE all the content you've
-        been given about issues, pull requests, and comments to provide a comprehensive overview of:
         
-        - Major features being developed or completed
-        - Significant bugs fixed or issues addressed
-        - Important architectural changes or decisions
-        - Recurring themes or focus areas in the development work
+        [Your comprehensive combined analysis here, organized into logical subsections]
         
-        Include specific examples with references to issues/PRs as clickable markdown links (e.g., [repo#123](https://github.com/repo/issues/123))
-        Explain the importance and implications of the key developments:
-        - What problems are these changes solving?
-        - What do these changes mean for the project's future direction?
-        - How do these changes connect to the project's overall goals?
-        - What would someone who hasn't been following the project need to know?
+        CRITICAL GUIDANCE FOR YOUR ANALYSIS:
         
-        Organize this information in a way that helps the reader understand the overall direction and 
-        priorities of the project, rather than just listing individual changes.
+        1. MOTIVATIONS & CONTEXT:
+           - Clearly explain WHY changes are being made - what problems are they solving?
+           - Provide context about the project's goals and how these changes relate to them
+           - Consider the broader implications for users, developers, and stakeholders
+           - Help someone not following the project understand why these changes MATTER
+        
+        2. SIGNIFICANCE & IMPACT:
+           - Don't just list what changed - explain why it's important
+           - Connect individual changes to broader themes or strategic directions
+           - Discuss potential future impact of the current work
+           - Highlight any shifts in project priorities or focus areas
+        
+        3. TECHNICAL INSIGHT:
+           - Provide deeper technical analysis beyond just listing changes
+           - Examine architectural implications where relevant
+           - Note interesting implementation approaches or design patterns
+           - Identify key technical challenges being addressed
+        
+        Guidelines for your analysis:
+        - Read and combine ALL the insights from each chunk to create one cohesive analysis
+        - Organize similar topics or developments together under appropriate subheadings
+        - Provide specific examples with references to issues/PRs as clickable markdown links
+        - Use rich Markdown formatting including headers, lists, and emphasis for readability
         
         IMPORTANT: 
-        - Your report should be a single coherent document that doesn't reference individual chunks
-        - All numerical data MUST be accurate based on the data provided in the input
-        - Use rich Markdown formatting including headers, lists, tables, and emphasis for readability
-        - Focus on DETAILED ANALYSIS of the actual content of issues, PRs and comments
+        - Your response should be a single coherent report that doesn't reference individual chunks
+        - Your analysis should provide VALUABLE INSIGHTS - not just summarize what happened, but explain
+          WHY it happened and what it MEANS for the project's future
         """
         full_final_prompt = final_prompt + "\n\n" + combined_response
 
@@ -1287,47 +1281,53 @@ def send_to_llm(
                     + combined_response
                 )
     else:
-        # For single chunk reports - updated prompt to match the structure of the final report
+        # For single chunk reports - updated prompt to focus on deeper analysis
         prompt = """
-        Please analyze this GitHub activity report and provide a structured summary.
+        Please analyze this GitHub activity report and provide an INSIGHTFUL and COMPREHENSIVE analysis of significant developments.
         
-        ABSOLUTELY CRITICAL: ONLY use data that is explicitly stated in the report provided. 
-        DO NOT make up or estimate ANY statistics or information not directly mentioned.
-        NEVER invent contributors, commit counts, PR counts, issue counts, or other metrics.
+        Your ONLY task is to create a detailed "Significant Developments" section by reading 
+        all issue and PR descriptions and comments carefully. DO NOT include an executive summary, key metrics, 
+        or contributors table - those will be handled separately.
         
-        Your summary should include:
+        IMPORTANT: Your output should ONLY include the "Significant Developments" section.
         
-        1. Executive Summary - Overall activity and key themes
-           - Only mention trends or focus areas if they are explicitly evident in the report
-           - If certain information is not clear from the report, say so rather than making assumptions
+        Format your response as:
         
-        2. Key Metrics - Use EXACT counts from the report
-           - Total issues: [exact count ONLY if provided]
-           - Total PRs: [exact count ONLY if provided]
-           - Total comments: [exact count ONLY if provided]
-           - Most active repositories: [ONLY list repositories mentioned in the report]
+        ## Significant Developments
         
-        3. Contributors - YOU MUST REPRODUCE THE ENTIRE CONTRIBUTOR TABLE FROM THE REPORT
-           - IT IS ESSENTIAL THAT YOU INCLUDE THE FULL TABLE IN MARKDOWN FORMAT
-           - DO NOT ABBREVIATE, SUMMARIZE OR DROP THIS TABLE 
-           - INCLUDE EVERY SINGLE CONTRIBUTOR AND THEIR STATISTICS
-           - MAINTAIN the exact same format, columns, and sorting as in the original report
-           - INCLUDE the TOTAL row at the bottom of the table
+        [Your comprehensive analysis here, organized into logical subsections]
         
-        4. Significant Developments - IMPORTANT: Read ALL issue/PR descriptions and comments thoroughly
-           - Identify major features being developed or completed
-           - Highlight significant bugs fixed or issues addressed
-           - Note any important architectural changes or decisions
-           - Mention any recurring themes or focus areas in the development work
-           - Provide specific examples with references to issues/PRs as clickable markdown links (e.g., [repo#123](https://github.com/repo/issues/123))
-           - Explain the importance and implications of these developments
-           - What do these changes mean for the project's future direction?
-           - What problems are these changes solving?
-           - What would someone who hasn't been following the project need to know?
+        CRITICAL GUIDANCE FOR YOUR ANALYSIS:
         
-        FINAL REMINDER: You MUST strictly adhere to facts presented in the report. Fabricating data is strictly prohibited.
-        Focus on DETAILED ANALYSIS of the actual content of issues, PRs and comments to provide insight into what's
-        happening in the project beyond just the numbers.
+        1. MOTIVATIONS & CONTEXT:
+           - Clearly explain WHY changes are being made - what problems are they solving?
+           - Provide context about the project's goals and how these changes relate to them
+           - Consider the broader implications for users, developers, and stakeholders
+           - Help someone not following the project understand why these changes MATTER
+        
+        2. SIGNIFICANCE & IMPACT:
+           - Don't just list what changed - explain why it's important
+           - Connect individual changes to broader themes or strategic directions
+           - Discuss potential future impact of the current work
+           - Highlight any shifts in project priorities or focus areas
+        
+        3. TECHNICAL INSIGHT:
+           - Provide deeper technical analysis beyond just listing changes
+           - Examine architectural implications where relevant
+           - Note interesting implementation approaches or design patterns
+           - Identify key technical challenges being addressed
+        
+        Guidelines for your response:
+        - Read ALL issue/PR descriptions and comments thoroughly to identify:
+          - Major features being developed or completed
+          - Significant bugs fixed or issues addressed
+          - Important architectural changes or decisions
+          - Recurring themes or focus areas in the development work
+        - Provide specific examples with references to issues/PRs as clickable markdown links (e.g., [repo#123](https://github.com/repo/issues/123))
+        - Use rich Markdown formatting including headers, lists, and emphasis for readability
+        
+        IMPORTANT: Your analysis should provide VALUABLE INSIGHTS - not just summarize what happened, but explain
+        WHY it happened and what it MEANS for the project's future
         """
         full_prompt = prompt + "\n\n" + report_text
 
@@ -1390,6 +1390,16 @@ def cli():
     help="Number of days to include in the report (default: 7)",
 )
 @click.option(
+    "--start-date",
+    default=None,
+    help="Start date for the report (format: YYYY-MM-DD). Overrides --days if specified.",
+)
+@click.option(
+    "--end-date",
+    default=None,
+    help="End date for the report (format: YYYY-MM-DD). Defaults to today if not specified.",
+)
+@click.option(
     "--repositories",
     default=None,
     help="Comma-separated list of repositories to include (default: all)",
@@ -1429,6 +1439,8 @@ def cli(
     db_path,
     output,
     days,
+    start_date,
+    end_date,
     repositories,
     llm_api_key,
     llm_model,
@@ -1438,6 +1450,19 @@ def cli(
     verbose,
 ):
     """Generate a report of GitHub activity from a GIRD database."""
+    # Validate date formats if provided
+    if start_date:
+        try:
+            datetime.datetime.strptime(start_date, "%Y-%m-%d")
+        except ValueError:
+            raise ValueError("Invalid start date format. Use YYYY-MM-DD (e.g., 2025-03-01)")
+    
+    if end_date:
+        try:
+            datetime.datetime.strptime(end_date, "%Y-%m-%d")
+        except ValueError:
+            raise ValueError("Invalid end date format. Use YYYY-MM-DD (e.g., 2025-03-25)")
+    
     # Get API key from environment if not provided
     if llm_api_key is None:
         llm_api_key = os.environ.get("LLM_API_KEY")
@@ -1460,8 +1485,22 @@ def cli(
     # Open database connection
     with GirdDatabase(db_path) as gird_db:
         # Determine date range
-        end_date_obj = datetime.datetime.now()
-        start_date_obj = end_date_obj - datetime.timedelta(days=days)
+        if start_date:
+            start_date_obj = datetime.datetime.strptime(start_date, "%Y-%m-%d")
+        else:
+            start_date_obj = datetime.datetime.now() - datetime.timedelta(days=days)
+            # Set to the beginning of the day
+            start_date_obj = start_date_obj.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        if end_date:
+            end_date_obj = datetime.datetime.strptime(end_date, "%Y-%m-%d")
+            # Set to the end of the day (23:59:59)
+            end_date_obj = end_date_obj.replace(hour=23, minute=59, second=59, microsecond=999999)
+        else:
+            end_date_obj = datetime.datetime.now()
+            # For "now", only set to end of day if it's based on days calculation, not current time
+            if not start_date:
+                end_date_obj = end_date_obj.replace(hour=23, minute=59, second=59, microsecond=999999)
 
         # Get activity data
         activity = gird_db.get_recent_activity(
@@ -1494,6 +1533,8 @@ def cli(
         if llm_api_key and not dry_run:
             # Send to LLM and print response
             print(f"\nSending report to {llm_model} for analysis...")
+            
+            # Get only significant developments from the LLM
             llm_response = send_to_llm(
                 wrapped_report,
                 llm_api_key,
@@ -1504,8 +1545,72 @@ def cli(
                 activity=activity,
                 verbose=verbose,
             )
+            
+            # Find the Contributors section in the original report
+            contributors_section = extract_contributors_section(wrapped_report)
+            
+            # Extract just the significant developments from the LLM response
+            significant_developments = extract_significant_developments(llm_response)
+            
+            # Create final combined report with the LLM analysis and the original contributors data
+            final_report = f"""
+# GitHub Activity Report: {start_date_obj.strftime('%B %d')} - {end_date_obj.strftime('%B %d, %Y')}
+
+## Key Metrics
+- **Issues Created:** {len(activity.get('issues', []))}
+- **Pull Requests Created:** {len(activity.get('prs', []))}
+- **Comments Added:** {len(activity.get('comments', []))}
+- **Repositories:** {', '.join(sorted(set(item.get('repository', '') for item in activity.get('issues', []) + activity.get('prs', []))))}
+
+{contributors_section}
+
+{significant_developments}
+"""
+            
             print(f"\n--- {llm_model} Summary ---\n")
-            print(llm_response)
+            print(final_report)
+
+
+def extract_contributors_section(report_text):
+    """
+    Extract the Contributors section from the report.
+    
+    Args:
+        report_text: The full report text
+        
+    Returns:
+        The Contributors section with the table intact
+    """
+    # Find the Contributors section
+    match = re.search(r'## Contributors(.*?)(?=\n## |$)', report_text, re.DOTALL)
+    if match:
+        return "## Contributors" + match.group(1).rstrip()
+    return "## Contributors\n*No contributor data available*"
+
+
+def extract_significant_developments(llm_response):
+    """
+    Extract just the Significant Developments section from the LLM response.
+    
+    Args:
+        llm_response: The full LLM response
+        
+    Returns:
+        The Significant Developments section, or an empty string if not found
+    """
+    # Try to find any section that looks like the significant developments
+    for pattern in [
+        r'## Significant Developments(.*?)(?=\n## |$)',
+        r'## Development Focus Areas(.*?)(?=\n## |$)',
+        r'## Key Developments(.*?)(?=\n## |$)',
+        r'## Major Developments(.*?)(?=\n## |$)',
+    ]:
+        match = re.search(pattern, llm_response, re.DOTALL)
+        if match:
+            return "## Significant Developments" + match.group(1).rstrip()
+    
+    # If no section was found, return basic structure
+    return "## Significant Developments\n*No significant developments identified*"
 
 
 if __name__ == "__main__":
