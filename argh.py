@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 
 """
-GitHub Activity Report Generator for GIRD
+argh: Activity Reporter for GitHub
 
-Generates reports for recent GitHub activity from a GIRD database.
+Generates reports for recent GitHub activity from a database.
 
-This script analyzes GitHub issue and pull request activity stored in a GIRD SQLite database
+This script analyzes GitHub issue and pull request activity stored in a SQLite database
 and generates a detailed Markdown report that can be:
 1. Viewed directly as plain text
 2. Sent to an LLM (Anthropic's Claude or OpenAI) for summarization
@@ -17,20 +17,20 @@ Features:
 - Markdown formatting with proper GitHub links
 
 Usage:
-  python gird_activity_report.py [OPTIONS]
+  python argh.py [OPTIONS]
 
 Examples:
   # Generate a report for the last 7 days and print to console
-  python gird_activity_report.py
+  python argh.py
 
   # Generate a report with OpenAI and save to file
-  python gird_activity_report.py --llm-provider openai --output report.md
+  python argh.py --llm-provider openai --output report.md
 
   # Generate a report for specific repositories for the last 14 days
-  python gird_activity_report.py --days 14 --repositories "owner/repo1,owner/repo2"
+  python argh.py --days 14 --repositories "owner/repo1,owner/repo2"
 
 Requirements:
-  - A GIRD SQLite database (github_issues.db by default)
+  - A SQLite database (github_issues.db by default)
   - chatlas Python package for LLM integration (pip install chatlas)
   - API key for Anthropic or OpenAI
 """
@@ -146,8 +146,8 @@ def format_date(date_str):
         return date_str
 
 
-class GirdDatabase:
-    """Class to interact with the GIRD SQLite database."""
+class Database:
+    """Class to interact with the SQLite database."""
 
     def __init__(self, db_path: str):
         """Initialize database connection.
@@ -1017,6 +1017,7 @@ def format_activity_for_report(
             for issue in issues
             if issue.get("number", 0) > 0 and issue.get("title", "").strip()
         ]
+
         valid_issues.sort(
             key=lambda x: x.get("repository", "") + str(x.get("number", 0))
         )
@@ -1198,9 +1199,7 @@ def send_to_llm(
         "Significant Developments" section. DO NOT include any other sections like Executive Summary, 
         Contributors, or Key Metrics.
         
-        IMPORTANT: Your output should ONLY include the "Significant Developments" section.
-        
-        Format your response as:
+        IMPORTANT: Use EXACTLY these section headers and formats to ensure statistics can be properly aggregated:
         
         ## Significant Developments
         
@@ -1369,7 +1368,7 @@ def send_to_llm(
 
 @click.group()
 def cli():
-    """GitHub Issues Repo Database (GIRD) Activity Report Generator."""
+    """Activity Reporter for GitHub (argh)."""
     pass
 
 
@@ -1377,7 +1376,7 @@ def cli():
 @click.option(
     "--db-path",
     default=DEFAULT_DB_PATH,
-    help=f"Path to GIRD SQLite database (default: {DEFAULT_DB_PATH})",
+    help=f"Path to SQLite database (default: {DEFAULT_DB_PATH})",
 )
 @click.option(
     "--output",
@@ -1449,7 +1448,7 @@ def cli(
     custom_prompt,
     verbose,
 ):
-    """Generate a report of GitHub activity from a GIRD database."""
+    """Generate a report of GitHub activity from a database."""
     # Validate date formats if provided
     if start_date:
         try:
@@ -1483,7 +1482,7 @@ def cli(
             )
 
     # Open database connection
-    with GirdDatabase(db_path) as gird_db:
+    with Database(db_path) as db:
         # Determine date range
         if start_date:
             start_date_obj = datetime.datetime.strptime(start_date, "%Y-%m-%d")
@@ -1503,7 +1502,7 @@ def cli(
                 end_date_obj = end_date_obj.replace(hour=23, minute=59, second=59, microsecond=999999)
 
         # Get activity data
-        activity = gird_db.get_recent_activity(
+        activity = db.get_recent_activity(
             start_date_obj,
             end_date_obj,
             repositories.split(",") if repositories else None,
