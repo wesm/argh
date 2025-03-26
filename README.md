@@ -1,5 +1,7 @@
 # argh: Activity Reporter for GitHub
 
+> This is an AI-generated tool created as a one-off hackathon project.
+
 A comprehensive GitHub activity tracking and reporting solution consisting of two integrated components:
 
 1. **argh-sync**: A Go-based tool for scraping GitHub issue activity from multiple repositories into a local SQLite database with support for incremental updates
@@ -273,16 +275,19 @@ python argh.py --verbose --output full_report.md
 For more insightful analysis, you can use LLM capabilities:
 
 1. Install the chatlas package:
+
    ```bash
    pip install chatlas
    ```
 
 2. Run the activity report script with LLM parameters:
+
    ```bash
    python argh.py --llm-api-key your_api_key
    ```
 
 3. Preview the LLM prompt without making API calls:
+
    ```bash
    python argh.py --dry-run
    ```
