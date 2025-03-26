@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/google/go-github/v57/github"
-	"github.com/wesm/github-issue-digest/internal/api"
-	"github.com/wesm/github-issue-digest/internal/db"
+	"github.com/wesm/argh/internal/api"
+	"github.com/wesm/argh/internal/db"
 )
 
 // Syncer represents a syncer for syncing GitHub issues to a local database

@@ -9,12 +9,12 @@ import (
 
 const (
 	// EnvGithubToken is the environment variable name for the GitHub API token
-	EnvGithubToken = "GIRD_GITHUB_TOKEN"
+	EnvGithubToken = "ARGH_GITHUB_TOKEN"
 )
 
 // Config represents the application configuration
 type Config struct {
-	// GitHub API token for authentication (optional, can be set via GIRD_GITHUB_TOKEN env var)
+	// GitHub API token for authentication (optional, can be set via ARGH_GITHUB_TOKEN env var)
 	GitHubToken string `json:"github_token"`
 
 	// Path to the SQLite database file

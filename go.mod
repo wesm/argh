@@ -1,4 +1,4 @@
-module github.com/wesm/github-issue-digest
+module github.com/wesm/argh
 
 go 1.23.0
 

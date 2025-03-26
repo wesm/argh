@@ -8,9 +8,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/wesm/github-issue-digest/config"
-	"github.com/wesm/github-issue-digest/internal/db"
-	"github.com/wesm/github-issue-digest/internal/sync"
+	"github.com/wesm/argh/config"
+	"github.com/wesm/argh/internal/db"
+	"github.com/wesm/argh/internal/sync"
 )
 
 func main() {
@@ -89,12 +89,12 @@ func main() {
 	// If no operation flags are set, show help and exit
 	if !needConfig {
 		// No sync operation requested - show help message
-		fmt.Println("GIRD - GitHub Issues Repo Database")
-		fmt.Println("==================================")
+		fmt.Println("argh-sync - GitHub Issues Repo Archiver")
+		fmt.Println("======================================")
 		fmt.Println("A tool for syncing GitHub issues and pull requests to a local SQLite database.")
 		fmt.Println()
 		fmt.Println("USAGE:")
-		fmt.Println("  ./gird [options]")
+		fmt.Println("  ./argh-sync [options]")
 		fmt.Println()
 		fmt.Println("OPTIONS:")
 		fmt.Println("  -init                   Create a default configuration file")
@@ -105,11 +105,11 @@ func main() {
 		fmt.Println("  -workers <num>          Number of worker goroutines for syncing repositories (default: 5)")
 		fmt.Println()
 		fmt.Println("EXAMPLES:")
-		fmt.Println("  ./gird -init                           # Create default config.json")
-		fmt.Println("  ./gird -add-repo golang/go             # Add the Go repository to config")
-		fmt.Println("  ./gird -sync-repo golang/go            # Sync only the Go repository")
-		fmt.Println("  ./gird -sync-all                       # Sync all configured repositories")
-		fmt.Println("  ./gird -config custom.json -sync-all   # Use custom config file and sync all repos")
+		fmt.Println("  ./argh-sync -init                           # Create default config.json")
+		fmt.Println("  ./argh-sync -add-repo golang/go             # Add the Go repository to config")
+		fmt.Println("  ./argh-sync -sync-repo golang/go            # Sync only the Go repository")
+		fmt.Println("  ./argh-sync -sync-all                       # Sync all configured repositories")
+		fmt.Println("  ./argh-sync -config custom.json -sync-all   # Use custom config file and sync all repos")
 		fmt.Println()
 		fmt.Println("CONFIGURATION:")
 		fmt.Printf("  GitHub token can be provided via the %s environment variable\n", config.EnvGithubToken)
@@ -133,12 +133,12 @@ func main() {
 	}
 
 	// Get GitHub token from environment variable or configuration
-	token := os.Getenv("GIRD_GITHUB_TOKEN")
+	token := os.Getenv(config.EnvGithubToken)
 	if token == "" {
 		token = cfg.GitHubToken
 	}
 	if token == "" {
-		log.Fatalf("GitHub token not found. Please set the GIRD_GITHUB_TOKEN environment variable or add it to the configuration file.")
+		log.Fatalf("GitHub token not found. Please set the %s environment variable or add it to the configuration file.", config.EnvGithubToken)
 	}
 
 	// Initialize syncer - always use REST API

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/google/go-github/v57/github"
-	"github.com/wesm/github-issue-digest/internal/models"
+	"github.com/wesm/argh/internal/models"
 	"golang.org/x/oauth2"
 )
 

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/wesm/github-issue-digest/internal/models"
+	"github.com/wesm/argh/internal/models"
 )
 
 // DB represents the database connection
