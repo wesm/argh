@@ -13,7 +13,7 @@ and generates a detailed Markdown report that can be:
 Features:
 - Filter activity by date range
 - Filter by specific repositories
-- Generate summaries using Claude 3.7 Sonnet (default) or OpenAI models
+- Generate summaries using Claude 3.7 Sonnet (default), OpenAI models, or Google Gemini models
 - Markdown formatting with proper GitHub links
 
 Usage:
@@ -32,7 +32,7 @@ Examples:
 Requirements:
   - A SQLite database (github_issues.db by default)
   - chatlas Python package for LLM integration (pip install chatlas)
-  - API key for Anthropic or OpenAI
+  - API key for Anthropic, OpenAI, or Google
 """
 
 import os
@@ -46,6 +46,7 @@ import click
 CHATLAS_AVAILABLE = False
 ANTHROPIC_AVAILABLE = False
 OPENAI_AVAILABLE = False
+GOOGLE_AVAILABLE = False
 
 try:
     from chatlas import ChatAnthropic
@@ -62,6 +63,15 @@ try:
     CHATLAS_AVAILABLE = True
 except ImportError:
     pass
+
+try:
+    from chatlas import ChatGoogle
+
+    GOOGLE_AVAILABLE = True
+    CHATLAS_AVAILABLE = True
+except ImportError:
+    pass
+
 
 if not CHATLAS_AVAILABLE:
     print("Warning: chatlas package not found. Install with: pip install chatlas")
@@ -1071,7 +1081,7 @@ def send_to_llm(
         model_name: The model name to use (default: "claude-3-7-sonnet-latest")
         custom_prompt: Optional custom prompt to use
         dry_run: If True, only print the prompt without making API calls
-        provider: LLM provider to use (default: "anthropic", can also be "openai")
+        provider: LLM provider to use (default: "anthropic", can also be "openai" or "google")
         activity: The original activity data, used to create a verbose report for the LLM
         verbose: Whether verbose mode is enabled in the user output
 
@@ -1174,9 +1184,16 @@ def send_to_llm(
                                 "ChatOpenAI is not available. Please install with: pip install chatlas"
                             )
                         chat = ChatOpenAI(api_key=api_key, model=model_name)
+                    elif provider == "google":
+                        # Create a ChatGoogle instance
+                        if not GOOGLE_AVAILABLE:
+                            raise ImportError(
+                                "ChatGoogle is not available. Please install with: pip install chatlas"
+                            )
+                        chat = ChatGoogle(api_key=api_key, model=model_name)
                     else:
                         raise ValueError(
-                            "Invalid provider. Use 'anthropic' or 'openai'."
+                            "Invalid provider. Use 'anthropic', 'openai', or 'google'."
                         )
 
                     # Get response
@@ -1266,8 +1283,15 @@ def send_to_llm(
                             "ChatOpenAI is not available. Please install with: pip install chatlas"
                         )
                     chat = ChatOpenAI(api_key=api_key, model=model_name)
+                elif provider == "google":
+                     # Create a ChatGoogle instance
+                    if not GOOGLE_AVAILABLE:
+                        raise ImportError(
+                            "ChatGoogle is not available. Please install with: pip install chatlas"
+                        )
+                    chat = ChatGoogle(api_key=api_key, model=model_name)
                 else:
-                    raise ValueError("Invalid provider. Use 'anthropic' or 'openai'.")
+                    raise ValueError("Invalid provider. Use 'anthropic', 'openai', or 'google'.")
 
                 # Get final synthesis response - return only this, not the individual chunks
                 final_response = chat.chat(full_final_prompt, echo="none")
@@ -1356,8 +1380,15 @@ def send_to_llm(
                             "ChatOpenAI is not available. Please install with: pip install chatlas"
                         )
                     chat = ChatOpenAI(api_key=api_key, model=model_name)
+                elif provider == "google":
+                    # Create a ChatGoogle instance
+                    if not GOOGLE_AVAILABLE:
+                        raise ImportError(
+                            "ChatGoogle is not available. Please install with: pip install chatlas"
+                        )
+                    chat = ChatGoogle(api_key=api_key, model=model_name)
                 else:
-                    raise ValueError("Invalid provider. Use 'anthropic' or 'openai'.")
+                    raise ValueError("Invalid provider. Use 'anthropic', 'openai', or 'google'.")
 
                 # Get response
                 response = chat.chat(full_prompt, echo="none")
@@ -1416,7 +1447,7 @@ def cli():
 @click.option(
     "--llm-provider",
     default="anthropic",
-    type=click.Choice(["anthropic", "openai"]),
+    type=click.Choice(["anthropic", "openai", "google"]),
     help="LLM provider to use (default: anthropic)",
 )
 @click.option(
@@ -1479,6 +1510,10 @@ def cli(
         elif llm_provider == "openai" and not OPENAI_AVAILABLE:
             raise ImportError(
                 "ChatOpenAI is not available. Please install with: pip install chatlas"
+            )
+        elif llm_provider == "google" and not GOOGLE_AVAILABLE:
+             raise ImportError(
+                "ChatGoogle is not available. Please install with: pip install chatlas"
             )
 
     # Open database connection
