@@ -1211,8 +1211,8 @@ def send_to_llm(
                 except Exception as e:
                     error_message = f"Error processing chunk {i + 1} with model {model_name}: {e}"
                     print(error_message, file=sys.stderr) # Print error clearly
-                    # Add a placeholder to indicate failure for this chunk
-                    all_responses.append(f"[ERROR: Chunk {i + 1} failed - {e}]")
+                    # Re-raise the exception to halt execution
+                    raise e
 
         # Combine all responses
         combined_response = "\n\n".join(all_responses)
@@ -1309,8 +1309,8 @@ def send_to_llm(
             except Exception as e:
                 error_message = f"Error during final synthesis with model {model_name}: {e}"
                 print(error_message, file=sys.stderr) # Print error clearly
-                # Return a formatted error message instead of raw data
-                return f"Error: Failed to create final synthesis.\nDetails: {e}\n\nCombined chunk summaries (for debugging):\n{combined_response}"
+                # Re-raise the exception to halt execution
+                raise e
     else:
         # For single chunk reports - updated prompt to focus on deeper analysis
         prompt = """
@@ -1404,8 +1404,8 @@ def send_to_llm(
             except Exception as e:
                 error_message = f"Error generating report with model {model_name}: {e}"
                 print(error_message, file=sys.stderr) # Print error clearly
-                # Return a formatted error message
-                return f"Error: Failed to generate report summary.\nDetails: {e}"
+                # Re-raise the exception to halt execution
+                raise e
 
 
 @click.group()
