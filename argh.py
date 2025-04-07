@@ -35,6 +35,14 @@ Requirements:
   - API key for Anthropic, OpenAI, or Google
 """
 
+# /// script
+# requires-python = ">=3.8"
+# dependencies = [
+#   "click",
+#   "chatlas[anthropic,openai,google]",
+# ]
+# ///
+
 import os
 import re
 import datetime
