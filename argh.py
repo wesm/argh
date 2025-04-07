@@ -45,6 +45,7 @@ Requirements:
 
 import os
 import re
+import sys
 import datetime
 import sqlite3
 from typing import Dict, List, Optional
@@ -1208,9 +1209,10 @@ def send_to_llm(
                     response = chat.chat(full_prompt, echo="none")
                     all_responses.append(str(response))
                 except Exception as e:
-                    all_responses.append(
-                        "Error processing chunk " + str(i + 1) + ": " + str(e)
-                    )
+                    error_message = f"Error processing chunk {i + 1} with model {model_name}: {e}"
+                    print(error_message, file=sys.stderr) # Print error clearly
+                    # Add a placeholder to indicate failure for this chunk
+                    all_responses.append(f"[ERROR: Chunk {i + 1} failed - {e}]")
 
         # Combine all responses
         combined_response = "\n\n".join(all_responses)
@@ -1305,12 +1307,10 @@ def send_to_llm(
                 final_response = chat.chat(full_final_prompt, echo="none")
                 return str(final_response)
             except Exception as e:
-                return (
-                    "Error creating final synthesis: "
-                    + str(e)
-                    + "\n\nRaw chunk data (for debugging):\n"
-                    + combined_response
-                )
+                error_message = f"Error during final synthesis with model {model_name}: {e}"
+                print(error_message, file=sys.stderr) # Print error clearly
+                # Return a formatted error message instead of raw data
+                return f"Error: Failed to create final synthesis.\nDetails: {e}\n\nCombined chunk summaries (for debugging):\n{combined_response}"
     else:
         # For single chunk reports - updated prompt to focus on deeper analysis
         prompt = """
@@ -1402,7 +1402,10 @@ def send_to_llm(
                 response = chat.chat(full_prompt, echo="none")
                 return str(response)
             except Exception as e:
-                return "Error: " + str(e)
+                error_message = f"Error generating report with model {model_name}: {e}"
+                print(error_message, file=sys.stderr) # Print error clearly
+                # Return a formatted error message
+                return f"Error: Failed to generate report summary.\nDetails: {e}"
 
 
 @click.group()
