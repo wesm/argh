@@ -1452,8 +1452,8 @@ def cli():
 )
 @click.option(
     "--llm-model",
-    default="claude-3-7-sonnet-latest",
-    help="Model name for the LLM (default: claude-3-7-sonnet-latest)",
+    default="claude-3-sonnet-20240229",
+    help="Model name for the LLM (default: claude-3-sonnet-20240229)",
 )
 @click.option(
     "--llm-provider",
